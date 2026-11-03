@@ -1,0 +1,115 @@
+import { DecimalPipe } from '@angular/common';
+import {
+  Component,
+  DestroyRef,
+  WritableSignal,
+  afterNextRender,
+  computed,
+  effect,
+  inject,
+  signal,
+} from '@angular/core';
+import { Router } from '@angular/router';
+import { ConciliacionStore } from '../../core/services/conciliacion.store';
+import { ConexionesStore } from '../../core/services/conexiones.store';
+import { ConsultaArca } from './consulta-arca';
+
+type TipoArchivo = 'arca' | 'mayor';
+
+interface ZonaCarga {
+  tipo: TipoArchivo;
+  titulo: string;
+  ayuda: string;
+  accept: string;
+  archivo: File | null;
+}
+
+@Component({
+  selector: 'app-importar',
+  imports: [DecimalPipe, ConsultaArca],
+  templateUrl: './importar.html',
+})
+export class Importar {
+  protected readonly store = inject(ConciliacionStore);
+  protected readonly conexiones = inject(ConexionesStore);
+  private readonly router = inject(Router);
+
+  /** Cómo se arma una conciliación: un mes, una empresa y un impuesto, de los dos lados. */
+  protected readonly pasos = [
+    { titulo: 'Período y empresa', ayuda: 'Las fechas a analizar y la CUIT del cliente.' },
+    { titulo: 'Excel de ARCA', ayuda: 'Mis Retenciones filtrado por esa CUIT, el impuesto y las fechas.' },
+    { titulo: 'Excel de Xubio', ayuda: 'El Libro Mayor de la cuenta de retenciones de ese impuesto, mismas fechas.' },
+    { titulo: 'Cruce', ayuda: 'Comprobante contra comprobante: faltantes de cada lado.' },
+  ];
+
+  protected readonly zonas = computed<ZonaCarga[]>(() => [
+    {
+      tipo: 'arca',
+      titulo: 'Excel de ARCA · Mis Retenciones',
+      ayuda: 'Filtrado por la CUIT, el impuesto y las fechas · CSV, XLSX o TXT',
+      accept: '.csv,.xlsx,.xls,.txt',
+      archivo: this.store.archivoArca(),
+    },
+    {
+      tipo: 'mayor',
+      titulo: 'Excel de Xubio · Libro Mayor',
+      ayuda: 'La cuenta de retenciones de ese impuesto, mismas fechas · CSV o XLSX',
+      accept: '.csv,.xlsx,.xls',
+      archivo: this.store.archivoMayor(),
+    },
+  ]);
+
+  /** Zona de arrastre que tiene un archivo encima (para resaltarla). */
+  protected readonly arrastrando = signal<TipoArchivo | null>(null);
+
+  /** Solo redirigimos si la conciliación se inició desde esta pantalla. */
+  private readonly esperandoResultado = signal(false);
+
+  constructor() {
+    const destroyRef = inject(DestroyRef);
+    afterNextRender(() => this.conexiones.seguir(destroyRef));
+
+    // Al terminar el cruce, llevar al usuario a ver los resultados.
+    effect(() => {
+      if (this.esperandoResultado() && this.store.fase() === 'completado') {
+        this.router.navigate(['/conciliacion']);
+      }
+    });
+  }
+
+  protected conciliar(): void {
+    this.esperandoResultado.set(true);
+    this.store.conciliar();
+  }
+
+  protected conciliarDesdeConexiones(): void {
+    this.esperandoResultado.set(true);
+    this.store.conciliarDesdeConexiones();
+  }
+
+  protected onArchivoSeleccionado(event: Event, tipo: TipoArchivo): void {
+    const input = event.target as HTMLInputElement;
+    this.archivoDe(tipo).set(input.files?.item(0) ?? null);
+    input.value = '';
+  }
+
+  protected onDragOver(event: DragEvent, tipo: TipoArchivo): void {
+    event.preventDefault();
+    this.arrastrando.set(tipo);
+  }
+
+  protected onDrop(event: DragEvent, tipo: TipoArchivo): void {
+    event.preventDefault();
+    this.arrastrando.set(null);
+    const archivo = event.dataTransfer?.files.item(0);
+    if (archivo) this.archivoDe(tipo).set(archivo);
+  }
+
+  protected quitar(tipo: TipoArchivo): void {
+    this.archivoDe(tipo).set(null);
+  }
+
+  private archivoDe(tipo: TipoArchivo): WritableSignal<File | null> {
+    return tipo === 'arca' ? this.store.archivoArca : this.store.archivoMayor;
+  }
+}

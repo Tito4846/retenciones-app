@@ -1,0 +1,32 @@
+[project]
+name = "api-retenciones"
+version = "0.1.0"
+description = "Backend de conciliacion de retenciones ARCA contra el Libro Mayor de Xubio"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.29.0",
+    "python-multipart>=0.0.9",
+    "pydantic-settings>=2.2.1",
+    "pandas>=2.2.0",
+    "openpyxl>=3.1.2",
+    # Los .xls viejos (BIFF) no los lee openpyxl.
+    "xlrd>=2.0.1",
+    # Para escalar el logo del membrete del Excel.
+    "pillow>=10.0.0",
+    # Bots de ARCA y Xubio. Usan el Chrome instalado (channel="chrome"): no
+    # hace falta `playwright install`.
+    "playwright>=1.40.0",
+    # pandas.read_html: la tabla de resultados de Mis Retenciones.
+    "lxml>=5.0.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "httpx>=0.27.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
