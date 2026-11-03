@@ -1,0 +1,227 @@
+<header class="mb-8 flex items-start gap-4">
+  <div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-700">
+    <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M9 2v6" /><path d="M15 2v6" /><path d="M12 17v5" /><path d="M5 8h14v3a7 7 0 0 1-14 0z" />
+    </svg>
+  </div>
+  <div>
+    <h1 class="text-2xl font-semibold">Conexiones</h1>
+    <p class="mt-1 text-lg text-muted">
+      Conectá los bots de ARCA y Xubio para traer las retenciones y el Libro Mayor sin descargar archivos a mano.
+    </p>
+  </div>
+</header>
+
+@if (store.sinServidor()) {
+  <p class="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+    No se pudo hablar con el servidor. Revisá que el backend esté corriendo en el puerto 8000.
+  </p>
+}
+@if (store.error(); as error) {
+  <p class="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{{ error }}</p>
+}
+
+<div class="grid gap-6 xl:grid-cols-2">
+  <!-- ARCA -->
+  <section class="rounded-2xl border border-line bg-white p-6">
+    <div class="mb-4 flex items-center justify-between gap-3">
+      <div>
+        <h2 class="text-lg font-semibold">ARCA</h2>
+        <p class="text-sm text-muted">Mis Retenciones, con tu clave fiscal.</p>
+      </div>
+      @switch (store.arca()?.estado) {
+        @case ('conectado') {
+          <span class="rounded-full bg-emerald-50 px-3 py-1 text-sm font-semibold text-emerald-700">Conectado</span>
+        }
+        @case ('conectando') {
+          <span class="rounded-full bg-amber-50 px-3 py-1 text-sm font-semibold text-amber-700">Conectando…</span>
+        }
+        @default {
+          <span class="rounded-full bg-canvas px-3 py-1 text-sm font-semibold text-muted">Sin conectar</span>
+        }
+      }
+    </div>
+
+    @switch (store.arca()?.estado) {
+      @case ('conectado') {
+        <p class="text-sm">
+          Conectado con la CUIT <span class="font-mono">{{ store.arca()?.cuit }}</span>.
+        </p>
+        <p class="mt-2 text-sm text-muted">{{ store.arca()?.mensaje }}</p>
+        <div class="mt-4 flex flex-wrap gap-3">
+          <a routerLink="/importar" class="rounded-lg bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-800">
+            Consultar retenciones
+          </a>
+          <button type="button" (click)="store.mostrar('arca')" class="rounded-lg border border-line px-4 py-2 text-sm font-semibold hover:bg-canvas">
+            Abrir ventana de ARCA
+          </button>
+          <button type="button" (click)="store.desconectarArca()" class="rounded-lg border border-line px-4 py-2 text-sm font-semibold hover:bg-canvas">
+            Desconectar
+          </button>
+        </div>
+      }
+      @case ('conectando') {
+        <div class="flex items-center gap-3 text-sm text-muted">
+          <span class="h-5 w-5 shrink-0 animate-spin rounded-full border-[3px] border-brand-100 border-t-brand-600"></span>
+          {{ store.arca()?.mensaje }}
+        </div>
+        <button type="button" (click)="store.desconectarArca()" class="mt-4 rounded-lg border border-line px-4 py-2 text-sm font-semibold hover:bg-canvas">
+          Cancelar
+        </button>
+      }
+      @default {
+        @if (store.arca()?.mensaje; as mensaje) {
+          <p class="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">{{ mensaje }}</p>
+        }
+        <form #formArca class="grid gap-3 sm:grid-cols-2" (submit)="$event.preventDefault(); conectarArca(formArca)">
+          <label class="block">
+            <span class="mb-1 block text-sm font-medium">CUIT</span>
+            <input
+              name="cuit"
+              type="text"
+              inputmode="numeric"
+              autocomplete="username"
+              placeholder="20-12345678-9"
+              (input)="faltaArca.set(null)"
+              class="w-full rounded-lg border border-line px-3 py-2 text-sm focus:border-brand-400 focus:outline-none"
+            />
+          </label>
+          <label class="block">
+            <span class="mb-1 block text-sm font-medium">Clave fiscal</span>
+            <input
+              name="clave"
+              type="password"
+              autocomplete="current-password"
+              (input)="faltaArca.set(null)"
+              class="w-full rounded-lg border border-line px-3 py-2 text-sm focus:border-brand-400 focus:outline-none"
+            />
+          </label>
+          <div class="sm:col-span-2">
+            @if (faltaArca(); as falta) {
+              <p class="mb-2 text-sm text-red-600">{{ falta }}</p>
+            }
+            <button
+              type="submit"
+              [disabled]="store.enviando()"
+              class="rounded-lg bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:bg-brand-400"
+            >
+              Conectar ARCA
+            </button>
+          </div>
+        </form>
+      }
+    }
+
+    @if (store.arca()?.descarga; as descarga) {
+      <div class="mt-5 flex items-center gap-3 rounded-xl border border-line bg-canvas px-4 py-3">
+        <svg class="h-5 w-5 shrink-0 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20 6 9 17l-5-5" />
+        </svg>
+        <div class="min-w-0 text-sm">
+          <p class="truncate font-semibold">{{ descarga.nombre }}</p>
+          <p class="text-muted">{{ descarga.filas }} retenciones · exportado a las {{ descarga.cuando | date: 'HH:mm' }}</p>
+        </div>
+      </div>
+    }
+  </section>
+
+  <!-- Xubio -->
+  <section class="rounded-2xl border border-line bg-white p-6">
+    <div class="mb-4 flex items-center justify-between gap-3">
+      <div>
+        <h2 class="text-lg font-semibold">Xubio</h2>
+        <p class="text-sm text-muted">Libro Mayor de las cuentas de retenciones.</p>
+      </div>
+      @switch (store.xubio()?.estado) {
+        @case ('conectado') {
+          <span class="rounded-full bg-emerald-50 px-3 py-1 text-sm font-semibold text-emerald-700">Conectado</span>
+        }
+        @case ('esperando_ingreso') {
+          <span class="rounded-full bg-amber-50 px-3 py-1 text-sm font-semibold text-amber-700">Esperando ingreso…</span>
+        }
+        @default {
+          <span class="rounded-full bg-canvas px-3 py-1 text-sm font-semibold text-muted">Sin conectar</span>
+        }
+      }
+    </div>
+
+    @switch (store.xubio()?.estado) {
+      @case ('conectado') {
+        <p class="text-sm">
+          Conectado{{ store.xubio()?.usuario ? ' como ' + store.xubio()?.usuario : '' }}. El Libro Mayor se baja al conciliar.
+        </p>
+        <div class="mt-4 flex flex-wrap gap-3">
+          <button type="button" (click)="store.mostrar('xubio')" class="rounded-lg border border-line px-4 py-2 text-sm font-semibold hover:bg-canvas">
+            Abrir ventana de Xubio
+          </button>
+          <button type="button" (click)="store.desconectarXubio()" class="rounded-lg border border-line px-4 py-2 text-sm font-semibold hover:bg-canvas">
+            Desconectar
+          </button>
+        </div>
+      }
+      @case ('esperando_ingreso') {
+        <div class="flex items-center gap-3 text-sm text-muted">
+          <span class="h-5 w-5 shrink-0 animate-spin rounded-full border-[3px] border-brand-100 border-t-brand-600"></span>
+          {{ store.xubio()?.mensaje }}
+        </div>
+        <div class="mt-4 flex flex-wrap gap-3">
+          <button type="button" (click)="store.mostrar('xubio')" class="rounded-lg border border-line px-4 py-2 text-sm font-semibold hover:bg-canvas">
+            Abrir ventana de Xubio
+          </button>
+          <button type="button" (click)="store.desconectarXubio()" class="rounded-lg border border-line px-4 py-2 text-sm font-semibold hover:bg-canvas">
+            Cancelar
+          </button>
+        </div>
+      }
+      @default {
+        @if (store.xubio()?.mensaje; as mensaje) {
+          <p class="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">{{ mensaje }}</p>
+        }
+        @if (store.xubio()?.cuenta_env) {
+          <p class="mb-4 text-sm text-muted">
+            El servidor tiene la cuenta {{ store.xubio()?.usuario }}: el bot entra solo. Si querés usar otra, cargala abajo.
+          </p>
+        }
+        <form #formXubio class="grid gap-3 sm:grid-cols-2" (submit)="$event.preventDefault(); conectarXubio(formXubio)">
+          <label class="block">
+            <span class="mb-1 block text-sm font-medium">Mail de Xubio</span>
+            <input
+              name="usuario"
+              type="email"
+              autocomplete="username"
+              class="w-full rounded-lg border border-line px-3 py-2 text-sm focus:border-brand-400 focus:outline-none"
+            />
+          </label>
+          <label class="block">
+            <span class="mb-1 block text-sm font-medium">Contraseña</span>
+            <input
+              name="clave"
+              type="password"
+              autocomplete="current-password"
+              class="w-full rounded-lg border border-line px-3 py-2 text-sm focus:border-brand-400 focus:outline-none"
+            />
+          </label>
+          <div class="sm:col-span-2">
+            <button
+              type="submit"
+              [disabled]="store.enviando()"
+              class="rounded-lg bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:bg-brand-400"
+            >
+              Conectar Xubio
+            </button>
+            <p class="mt-2 text-xs text-muted">
+              Sin mail ni contraseña se abre la ventana y entrás vos. Si Xubio pide captcha, resolvelo en esa ventana.
+            </p>
+          </div>
+        </form>
+      }
+    }
+  </section>
+</div>
+
+<p class="mt-6 flex items-start gap-2 text-sm text-muted">
+  <svg class="mt-0.5 h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" />
+  </svg>
+  Las claves se usan solo para entrar y no se guardan. Las ventanas de los bots se abren en la computadora donde corre el servidor.
+</p>

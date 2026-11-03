@@ -1,0 +1,23 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Nunito Sans", ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+
+  /* Paleta compartida con el módulo de Conciliación Bancaria */
+  --color-brand-50: #eef4fa;
+  --color-brand-100: #dde9f4;
+  --color-brand-300: #8fb3d3;
+  --color-brand-400: #5f8fb8;
+  --color-brand-600: #0f5a8c;
+  --color-brand-700: #0b4a74;
+  --color-brand-800: #083a5c;
+
+  --color-ink: #1f2a37;
+  --color-muted: #64748b;
+  --color-canvas: #f3f5f8;
+  --color-line: #e3e8ef;
+}
+
+body {
+  @apply bg-canvas font-sans text-ink antialiased;
+}
