@@ -1,0 +1,18 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "frontend", "start"],
+      "port": 4200
+    },
+    {
+      "name": "backend",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "--directory", "backend", "uvicorn", "app.main:app", "--port", "8000", "--reload", "--reload-dir", "app"],
+      "port": 8000,
+      "autoPort": false
+    }
+  ]
+}
