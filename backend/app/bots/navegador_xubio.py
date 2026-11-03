@@ -39,6 +39,7 @@ from app.bots.chrome import (
     minimizar_ventana,
     mostrar_ventana,
 )
+from app.bots import libro_mayor_xubio
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -145,6 +146,8 @@ class NavegadorXubio:
         # (mail, contrasena) que mando la pantalla. SOLO en memoria; None = la del .env.
         self._cuenta: tuple[str, str] | None = None
         self._cerrar = False
+        # La empresa con la que se entro (la de arriba, junto a «Estudio:»).
+        self._empresa_activa: str | None = None
 
     # ------------------------------------------------------------------ API
 
@@ -164,6 +167,7 @@ class NavegadorXubio:
                 "mensaje": self._mensaje,
                 "usuario": cuenta[0] if cuenta else None,
                 "cuenta_env": bool(settings.XUBIO_USUARIO.strip() and settings.XUBIO_CLAVE),
+                "empresa_activa": self._empresa_activa,
             }
 
     @property
@@ -252,6 +256,36 @@ class NavegadorXubio:
 
         return self.ejecutar(pedir)
 
+    def libro_mayor_por_pantalla(
+        self,
+        desde: date,
+        hasta: date,
+        impuesto: str,
+        tipo: str,
+        avance: Callable[[str], None] = lambda detalle: None,
+    ) -> list[tuple[str, str]]:
+        """
+        El recorrido de una persona: Libro Mayor, «Elige los filtros» con las
+        fechas, en «Cuenta» la del impuesto y el tipo de ARCA, Aceptar. Devuelve
+        [(cuenta, reporte)]. Si la pantalla no responde, guarda una captura en
+        datos/debug y sale ErrorPantallaXubio.
+        """
+
+        def recorrer(pestana: Any, contexto: Any) -> list[tuple[str, str]]:
+            try:
+                return libro_mayor_xubio.recorrer(pestana, desde, hasta, impuesto, tipo, avance)
+            except Exception as error:
+                if es_cierre(error):
+                    raise
+                from app.bots.navegador_arca import capturar_paginas
+
+                capturar_paginas(contexto, settings.DIRECTORIO_DATOS / "debug", "xubio_libro_mayor")
+                if isinstance(error, libro_mayor_xubio.ErrorPantallaXubio):
+                    raise
+                raise libro_mayor_xubio.ErrorPantallaXubio(f"La pantalla de Libro Mayor no respondió: {error}") from error
+
+        return self.ejecutar(recorrer)
+
     # ----------------------------------------------------- hilo del navegador
 
     def _fijar(self, estado: str, mensaje: str | None) -> None:
@@ -324,6 +358,7 @@ class NavegadorXubio:
             elif not self.conectado:
                 self._fijar(CONECTADO, None)
                 ultimo_uso = time.monotonic()
+                self._empresa_activa = libro_mayor_xubio.empresa_activa(pestana) or self._empresa_activa
                 if not minimizada and settings.MINIMIZAR_VENTANA:
                     minimizada = minimizar_ventana(contexto, pestana)
             elif time.monotonic() - ultimo_uso > MANTENER_VIVA_S:

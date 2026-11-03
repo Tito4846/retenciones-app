@@ -9,7 +9,7 @@ certificado. Es el lado "lo que el fisco dice que te retuvieron".
 import logging
 
 from app.services.importador_tablas import leer_tabla, normalizar_columnas
-from app.services.impuestos import impuesto_de_texto
+from app.services.impuestos import impuesto_de_texto, tipo_de_texto
 from app.services.tools import (
     ErrorDeLectura,
     columna,
@@ -29,7 +29,7 @@ def _es_encabezado_arca(canonicas: set) -> bool:
 def leer_arca(ruta: str) -> list[dict]:
     """
     Devuelve las retenciones como {cuit, razon_social, fecha, importe, impuesto,
-    certificado, comprobante, regimen}.
+    certificado, comprobante, regimen, tipo}. La fila de total del pie se saltea.
 
     El importe va en positivo: una percepcion anulada viene en negativo en ARCA
     y se conserva con signo, para que no se empareje con un asiento normal.
@@ -53,6 +53,11 @@ def leer_arca(ruta: str) -> list[dict]:
             continue
 
         fecha = parse_fecha(columna(fila, "FECHA"))
+        cuit = normalizar_cuit(columna(fila, "CUIT"))
+        razon_social = texto(columna(fila, "RAZON_SOCIAL")) or ""
+        if fecha is None and not cuit and not razon_social:
+            # La fila de total que ARCA (o la persona) agrega al pie.
+            continue
         if fecha is None:
             sin_fecha += 1
 
@@ -67,14 +72,16 @@ def leer_arca(ruta: str) -> list[dict]:
 
         retenciones.append(
             {
-                "cuit": normalizar_cuit(columna(fila, "CUIT")),
-                "razon_social": texto(columna(fila, "RAZON_SOCIAL")) or "",
+                "cuit": cuit,
+                "razon_social": razon_social,
                 "fecha": fecha,
                 "importe": round(importe, 2),
                 "impuesto": impuesto,
                 "certificado": texto(columna(fila, "CERTIFICADO")),
                 "comprobante": texto(columna(fila, "COMPROBANTE")),
                 "regimen": texto(columna(fila, "REGIMEN")),
+                # "Descripción Operación": RETENCION o PERCEPCION.
+                "tipo": tipo_de_texto(columna(fila, "DETALLE")),
             }
         )
 

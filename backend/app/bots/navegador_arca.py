@@ -64,7 +64,16 @@ _VIGILANCIA_S = 1.0
 _MARCA_LOGIN = "F1:username"
 
 MENSAJE_CERRADO = "Se cerró la ventana de ARCA: tocá «Conectar ARCA» para volver a entrar."
-MENSAJE_CONECTADO = "Conectado a Mis Retenciones: elegí qué retenciones traer y tocá «Consultar en ARCA»."
+MENSAJE_CONECTADO = (
+    "Conectado a Mis Retenciones: elegí el período y el impuesto, y tocá «Traer y conciliar» "
+    "(o «Solo consultar ARCA» para traerlas sin conciliar)."
+)
+MENSAJE_SIN_FORMULARIO = (
+    "Conectado, pero ARCA no abrió el formulario de la versión anterior de Mis Retenciones: "
+    "tocá «click aquí» en la ventana de Chrome y el bot lo detecta solo."
+)
+# Sin formulario, cada cuanto se revisan las pestanas por si la persona llego a mano.
+_BUSCAR_FORMULARIO_S = 2.0
 
 
 class ErrorArca(RuntimeError):
@@ -196,6 +205,44 @@ def _entrar_al_servicio(pagina: Any) -> Any:
 
 
 _MARCA_MISRET = "/misret/"
+# El aviso "Podés acceder a la versión anterior del servicio haciendo click
+# aquí": el boton es solo "click aquí" y lleva a
+# .../misret/consultaMisRetenciones.do;jsessionid=...
+# Playwright evalua la regex en JavaScript, donde \b no toma la "í" como letra:
+# sin \b, y con la "í" compuesta o separada (i + tilde).
+_TEXTO_CLICK_AQUI = re.compile(r"clic?k?\s*aqu(?:[ií]|í)", re.IGNORECASE)
+
+
+def _buscar_click_aqui(pestana: Any, espera_ms: int) -> Any | None:
+    """El "click aqui" visible (link o boton antes que texto suelto), en la pagina o en sus marcos."""
+    limite = time.monotonic() + espera_ms / 1000
+    while True:
+        for marco in pestana.frames:
+            candidatos = (
+                marco.get_by_role("link", name=_TEXTO_CLICK_AQUI),
+                marco.get_by_role("button", name=_TEXTO_CLICK_AQUI),
+                marco.get_by_text(_TEXTO_CLICK_AQUI),
+            )
+            for candidato in candidatos:
+                try:
+                    boton = candidato.filter(visible=True).first
+                    if boton.count() > 0:
+                        return boton
+                except Exception as error:  # noqa: BLE001 - el marco puede estar cargando
+                    if es_cierre(error):
+                        raise
+        if time.monotonic() >= limite:
+            return None
+        pestana.wait_for_timeout(500)
+
+
+def _es_formulario_misret(pestana: Any) -> bool:
+    try:
+        return _MARCA_MISRET in (pestana.url or "") and pestana.locator(misret.SEL_CUIT_RETENIDO).count() > 0
+    except Exception as error:  # noqa: BLE001 - pestana cargando o cerrandose
+        if es_cierre(error):
+            raise
+        return False
 
 
 def _ir_a_version_anterior(pestana: Any) -> Any:
@@ -205,36 +252,50 @@ def _ir_a_version_anterior(pestana: Any) -> Any:
 
     El "click aqui" del aviso es un boton con JavaScript (no un link con
     direccion), asi que se toca como lo haria una persona; puede abrir otra
-    pestana o cambiar esta. Si no aparece o no lleva a ningun lado, se va
-    directo a ARCA_URL_MISRET con las cookies de la sesion.
+    pestana o cambiar esta. Si no aparece o no lleva a ningun lado, se prueba
+    ARCA_URL_MISRET en una pestana aparte: sin el pase de la version nueva
+    ARCA suele contestar 401, y asi la version nueva queda intacta para que la
+    persona toque "click aqui" a mano (el bot lo detecta en _atender).
     """
     if _MARCA_MISRET in (pestana.url or ""):
         return pestana
     s = settings
-    destino = pestana
-    boton = pestana.get_by_text("click aquí", exact=False).filter(visible=True).first
-    try:
-        boton.wait_for(state="visible", timeout=s.TIMEOUT_NAVEGACION_MS)
+    boton = _buscar_click_aqui(pestana, s.TIMEOUT_NAVEGACION_MS)
+    if boton is None:
+        logger.info("No aparecio el 'click aqui' de la version nueva de Mis Retenciones (%s)", pestana.url)
+    else:
+        destino = pestana
         try:
-            with pestana.context.expect_page(timeout=s.TIMEOUT_SERVICIO_MS) as info:
-                boton.click()
-            destino = info.value
-        except Exception:  # noqa: BLE001 - abrio en la misma pestana
-            destino = pestana
-        destino.wait_for_url(f"**{_MARCA_MISRET}**", timeout=s.TIMEOUT_NAVEGACION_MS)
-        return destino
-    except Exception as error:  # noqa: BLE001 - se prueba con la direccion directa
+            try:
+                with pestana.context.expect_page(timeout=s.TIMEOUT_SERVICIO_MS) as info:
+                    boton.click()
+                destino = info.value
+            except Exception:  # noqa: BLE001 - abrio en la misma pestana
+                destino = pestana
+            destino.wait_for_url(f"**{_MARCA_MISRET}**", timeout=s.TIMEOUT_NAVEGACION_MS)
+            return destino
+        except Exception as error:  # noqa: BLE001 - se prueba con la direccion directa
+            if es_cierre(error):
+                raise
+            logger.info("El 'click aqui' no llevo a la version anterior (%s); se prueba directo", error)
+
+    directa = pestana.context.new_page()
+    try:
+        respuesta = directa.goto(s.ARCA_URL_MISRET, timeout=s.TIMEOUT_NAVEGACION_MS)
+        directa.wait_for_load_state("domcontentloaded")
+        if (respuesta is None or respuesta.ok) and _es_formulario_misret(directa):
+            return directa
+        logger.info(
+            "La direccion directa de Mis Retenciones no abrio el formulario (HTTP %s)",
+            respuesta.status if respuesta else "?",
+        )
+    except Exception as error:  # noqa: BLE001
         if es_cierre(error):
             raise
-        logger.info("El 'click aqui' no llevo a la version anterior (%s); se va directo", error)
-
-    destino.goto(s.ARCA_URL_MISRET, timeout=s.TIMEOUT_NAVEGACION_MS)
-    if _MARCA_MISRET not in destino.url or _MARCA_LOGIN in destino.content():
-        raise ErrorArca(
-            "No se pudo abrir la versión anterior de Mis Retenciones "
-            f"({s.ARCA_URL_MISRET}). Probá entrar a mano con «click aquí» en la ventana."
-        )
-    return destino
+        logger.info("No se pudo abrir la direccion directa de Mis Retenciones: %s", error)
+    directa.close()
+    pestana.bring_to_front()
+    return pestana
 
 
 def capturar_paginas(contexto: Any, directorio: Path, etiqueta: str) -> list[str]:
@@ -576,10 +637,7 @@ class NavegadorArca:
                     pass
                 capturar_paginas(contexto, self._debug, "arca_servicio")
                 self._leer_formulario(pestana)
-                self._fijar(CONECTADO, MENSAJE_CONECTADO if self._formulario else (
-                    "Conectado, pero no se encontró el formulario de Mis Retenciones: "
-                    "consultá y exportá a mano en la ventana de Chrome."
-                ))
+                self._fijar(CONECTADO, MENSAJE_CONECTADO if self._formulario else MENSAJE_SIN_FORMULARIO)
                 self._atender(contexto, pestana, descargas)
         except BaseException as error:  # noqa: BLE001 - Chrome o ARCA pueden fallar de mil formas
             sobre_clave.clear()
@@ -607,15 +665,25 @@ class NavegadorArca:
                 self._url_formulario = pestana.url
 
     def _atender(self, contexto: Any, pestana: Any, descargas: list[Any]) -> None:
-        if settings.MINIMIZAR_VENTANA and not settings.HEADLESS:
+        # Sin formulario la ventana queda a la vista: la persona tiene que tocar
+        # "click aqui" para llegar a la version anterior.
+        buscar_formulario = self.formulario() is None
+        if settings.MINIMIZAR_VENTANA and not settings.HEADLESS and not buscar_formulario:
             minimizar_ventana(contexto, pestana)
         ultimo_uso = time.monotonic()
+        proxima_busqueda = time.monotonic()
         while True:
             if not any(not p.is_closed() for p in contexto.pages):
                 self._fijar(DESCONECTADO, MENSAJE_CERRADO)
                 return
             while descargas:
                 self._guardar_descarga(descargas.pop(0))
+            if buscar_formulario and time.monotonic() >= proxima_busqueda:
+                proxima_busqueda = time.monotonic() + _BUSCAR_FORMULARIO_S
+                encontrada = self._buscar_formulario(contexto)
+                if encontrada is not None:
+                    pestana, buscar_formulario = encontrada, False
+                    self._fijar(CONECTADO, MENSAJE_CONECTADO)
             if time.monotonic() - ultimo_uso > MANTENER_VIVA_S:
                 ultimo_uso = time.monotonic()
                 if not self._mantener_viva(contexto, pestana):
@@ -636,6 +704,17 @@ class NavegadorArca:
                     futuro.set_exception(error)
                     if es_cierre(error):
                         raise
+
+    def _buscar_formulario(self, contexto: Any) -> Any | None:
+        """La pestana con el formulario de Mis Retenciones (si la persona llego a mano), ya leido."""
+        for candidata in [p for p in contexto.pages if not p.is_closed()]:
+            if not _es_formulario_misret(candidata):
+                continue
+            self._leer_formulario(candidata)
+            if self.formulario() is not None:
+                logger.info("Formulario de Mis Retenciones encontrado en %s", candidata.url)
+                return candidata
+        return None
 
     def _guardar_descarga(self, descarga: Any) -> None:
         """Guarda lo que la persona exporto y lo valida con el lector de ARCA."""

@@ -158,8 +158,8 @@ def emparejar(task_id: str, arca_id: str, mayor_id: str) -> dict:
             raise KeyError(task_id)
         i = _indice(arca_id, "a", len(tarea.entrada.arca))
         j = _indice(mayor_id, "m", len(tarea.entrada.mayor.retenciones))
-        libres_arca = {f["id"] for f in tarea.resultado["detalle"]["no_declarados"]}
-        libres_mayor = {f["id"] for f in tarea.resultado["detalle"]["falta_certificado"]}
+        libres_arca = {f["id"] for f in tarea.resultado["detalle"]["faltan_en_mayor"]}
+        libres_mayor = {f["id"] for f in tarea.resultado["detalle"]["faltan_en_arca"]}
         if arca_id not in libres_arca:
             raise ErrorDeEmparejado("Esa retención de ARCA ya está conciliada.")
         if mayor_id not in libres_mayor:

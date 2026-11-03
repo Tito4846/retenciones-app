@@ -30,6 +30,7 @@ FORMULARIO = """<html><body>
     <option value=""></option>
     <option value="217">217 - SICORE-IMPTO.A LAS GANANCIAS</option>
     <option value="767">767 - SICORE - RETENCIONES Y PERCEPC</option>
+    <option value="216">216 - SIRE -  IVA</option>
   </select>
   <input name="retencionPercepcion" type="radio" value="Retencion" style="visibility:hidden">
   <input name="retencionPercepcion" type="radio" value="Percepcion" style="visibility:hidden">
@@ -39,10 +40,18 @@ FORMULARIO = """<html><body>
   <input class="inputbutton" type="submit" value="Consultar">
 </form>
 <script>
-  // Como ARCA: con el 767 se puede elegir Retencion o Percepcion; con el 217, solo el combinado.
+  // Como ARCA: con el 767 se puede elegir Retencion o Percepcion; con el 217,
+  // solo el combinado; con el 216, solo Retencion (y ARCA la deja marcada).
   function setRetencionPercepcion(impuesto) {
     document.querySelectorAll('input[name=retencionPercepcion]').forEach(function (r) {
-      if (r.value !== 'RetencionPercepcion') r.style.visibility = impuesto === '767' ? 'visible' : 'hidden';
+      if (impuesto === '216') {
+        r.style.visibility = r.value === 'Retencion' ? 'visible' : 'hidden';
+        r.checked = r.value === 'Retencion';
+      } else if (r.value !== 'RetencionPercepcion') {
+        r.style.visibility = impuesto === '767' ? 'visible' : 'hidden';
+      } else {
+        r.style.visibility = 'visible';
+      }
     });
   }
 </script></body></html>"""
@@ -166,6 +175,14 @@ def test_vuelve_al_formulario_para_el_siguiente_impuesto(pestana, servidor, tmp_
     filas = misret.consultar_impuesto(pestana, servidor, consulta, "217", tmp_path, pestana.avisos)
     assert [f["importe"] for f in filas] == [16100.0]
     assert _Arca.recibidos[-1]["retencionPercepcion"] == ["RetencionPercepcion"]
+
+
+def test_impuesto_que_solo_admite_retencion_usa_el_tipo_de_arca(pestana, servidor, tmp_path):
+    # Se pide el combinado (lo que manda la pantalla) y el 216 no lo admite.
+    pestana.goto(servidor)
+    misret.consultar_impuesto(pestana, servidor, _consulta(), "216", tmp_path, pestana.avisos)
+    assert _Arca.recibidos[-1]["impuesto"] == ["216"]
+    assert _Arca.recibidos[-1]["retencionPercepcion"] == ["Retencion"]
 
 
 def test_sin_resultados_devuelve_lista_vacia(pestana, servidor, tmp_path):

@@ -174,16 +174,29 @@ def _completar(pestana: Any, consulta: ConsultaArca, impuesto: str) -> None:
     # corresponden al impuesto) y copia el codigo al campo de texto.
     pestana.select_option(SEL_IMPUESTOS, value=impuesto)
     pestana.wait_for_timeout(300)
-    # ARCA oculta los radios que no corresponden al impuesto (con el 217 solo
-    # queda "Retencion y/o Percepcion"). Si el tipo pedido esta oculto, se usa
-    # el combinado, que es el unico que el formulario admite ahi.
-    tipo = pestana.locator(SEL_TIPO.format(consulta.tipo))
-    if not tipo.is_visible():
-        logger.info("El impuesto %s no admite '%s' en ARCA: se consulta combinado", impuesto, consulta.tipo)
-        tipo = pestana.locator(SEL_TIPO.format("RetencionPercepcion"))
-    tipo.check()
+    pestana.locator(SEL_TIPO.format(_tipo_para(pestana, consulta.tipo, impuesto))).check()
     pestana.fill(SEL_DESDE, _ddmmaaaa(consulta.desde))
     pestana.fill(SEL_HASTA, _ddmmaaaa(consulta.hasta))
+
+
+# Si el tipo pedido no corresponde al impuesto, el primero de estos que ARCA muestre.
+_TIPOS_POR_PREFERENCIA = ("RetencionPercepcion", "Retencion", "Percepcion")
+
+
+def _tipo_para(pestana: Any, pedido: str, impuesto: str) -> str:
+    """
+    ARCA oculta los radios que no corresponden al impuesto (el 216 solo admite
+    "Retencion", el 939 solo "Percepcion") y marca solo el que va. Si el tipo
+    pedido esta oculto se usa, como en ARCA, el que el formulario dejo
+    marcado o, si no, el primero a la vista (el combinado antes que el resto).
+    """
+    visibles = [t for t in _TIPOS_POR_PREFERENCIA if pestana.locator(SEL_TIPO.format(t)).is_visible()]
+    if pedido in visibles or not visibles:
+        return pedido
+    marcado = next((t for t in visibles if pestana.locator(SEL_TIPO.format(t)).is_checked()), None)
+    tipo = marcado or visibles[0]
+    logger.info("El impuesto %s no admite '%s' en ARCA: se consulta '%s'", impuesto, pedido, tipo)
+    return tipo
 
 
 def _texto(pestana: Any) -> str:

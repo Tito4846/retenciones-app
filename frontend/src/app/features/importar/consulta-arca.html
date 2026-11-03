@@ -17,7 +17,7 @@
     <div class="flex flex-wrap gap-2 text-xs font-semibold">
       <span class="flex items-center gap-1.5 rounded-full px-3 py-1" [class]="arcaConectado() ? 'bg-emerald-400/20 text-emerald-50' : 'bg-white/10 text-white/70'">
         <span class="h-1.5 w-1.5 rounded-full" [class]="arcaConectado() ? 'bg-emerald-300' : 'bg-white/50'"></span>
-        ARCA{{ arcaConectado() ? ' · ' + conexiones.arca()?.cuit : '' }}
+        ARCA{{ arcaConectado() ? ' · ' + (conexiones.arca()?.cuit | cuit) : '' }}
       </span>
       <span class="flex items-center gap-1.5 rounded-full px-3 py-1" [class]="xubioConectado() ? 'bg-emerald-400/20 text-emerald-50' : 'bg-white/10 text-white/70'">
         <span class="h-1.5 w-1.5 rounded-full" [class]="xubioConectado() ? 'bg-emerald-300' : 'bg-white/50'"></span>
@@ -28,24 +28,24 @@
 
   @if (!arcaConectado() || !formulario()) {
     <!-- Sin bots: qué falta para arrancar -->
-    <div class="px-6 py-8">
-      <div class="grid gap-4 sm:grid-cols-3">
-        @for (paso of pasos; track paso.id; let i = $index) {
-          <div class="rounded-xl border border-dashed border-line p-4">
-            <span class="flex h-7 w-7 items-center justify-center rounded-full bg-brand-50 text-sm font-bold text-brand-700">{{ i + 1 }}</span>
-            <p class="mt-3 font-semibold">{{ paso.titulo }}</p>
-            <p class="mt-0.5 text-sm text-muted">{{ paso.ayuda }}</p>
-          </div>
+    <div class="px-6 py-6">
+      <div class="flex flex-wrap items-center gap-4">
+        @if (arcaConectado()) {
+          <button type="button" (click)="conexiones.mostrar('arca')" class="rounded-lg bg-brand-700 px-5 py-2.5 font-semibold text-white transition-colors hover:bg-brand-800">
+            Mostrar la ventana de ARCA
+          </button>
+        } @else {
+          <a routerLink="/conexiones" class="rounded-lg bg-brand-700 px-5 py-2.5 font-semibold text-white transition-colors hover:bg-brand-800">
+            Conectar los bots
+          </a>
         }
-      </div>
-      <div class="mt-6 flex flex-wrap items-center gap-4">
-        <a routerLink="/conexiones" class="rounded-lg bg-brand-700 px-5 py-2.5 font-semibold text-white transition-colors hover:bg-brand-800">
-          Conectar los bots
-        </a>
         <p class="text-sm text-muted">
           @switch (conexiones.arca()?.estado) {
             @case ('conectando') { El bot de ARCA está entrando: {{ conexiones.arca()?.mensaje }} }
-            @case ('conectado') { ARCA está conectado pero la ventana no quedó en el formulario de Mis Retenciones. }
+            @case ('conectado') {
+              ARCA está conectado pero la ventana no quedó en el formulario de Mis Retenciones:
+              tocá «click aquí» en la ventana de ARCA para pasar a la versión anterior y el bot lo detecta solo.
+            }
             @default { Conectá ARCA (y Xubio para traer el mayor) en Conexiones. }
           }
         </p>
@@ -53,10 +53,47 @@
     </div>
   } @else if (formulario(); as f) {
     <div class="divide-y divide-line">
-      <!-- 1. Período -->
+      <!-- 1. Contribuyente -->
       <div class="grid gap-4 px-6 py-5 lg:grid-cols-[13rem_1fr]">
         <div class="flex items-start gap-3">
           <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-700 text-sm font-bold text-white">1</span>
+          <div>
+            <p class="font-semibold">Contribuyente</p>
+            <p class="text-sm text-muted">CUIT del retenido</p>
+          </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-3">
+          <select
+            aria-label="CUIT del retenido"
+            [value]="cuitRetenido()"
+            (change)="cuitRetenido.set($any($event.target).value)"
+            class="rounded-lg border-2 border-brand-300 bg-white px-3 py-2 font-mono text-base font-semibold text-brand-800 focus:border-brand-500 focus:outline-none"
+          >
+            @for (cuit of f.cuits; track cuit) {
+              <option [value]="cuit" [selected]="cuit === cuitRetenido()">{{ cuit | cuit }}</option>
+            }
+          </select>
+          <span class="text-sm text-muted">
+            @if (f.cuits.length > 1) {
+              Revisá que sea la empresa correcta: tu usuario de ARCA opera {{ f.cuits.length }} CUIT.
+            } @else {
+              La única CUIT que tu usuario de ARCA puede consultar.
+            }
+          </span>
+          <!-- El Libro Mayor sale de la empresa con la que se entró a Xubio en Conexiones -->
+          @if (xubioConectado()) {
+            <p class="w-full text-sm">
+              <span class="text-muted">Libro Mayor de Xubio:</span>
+              <span class="font-semibold">{{ empresaXubio() ?? 'la empresa con la que entraste en Conexiones' }}</span>
+            </p>
+          }
+        </div>
+      </div>
+
+      <!-- 2. Período: las mismas fechas en ARCA y en Xubio -->
+      <div class="grid gap-4 px-6 py-5 lg:grid-cols-[13rem_1fr]">
+        <div class="flex items-start gap-3">
+          <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-700 text-sm font-bold text-white">2</span>
           <div>
             <p class="font-semibold">Período</p>
             <p class="text-sm text-muted">Fecha de la retención</p>
@@ -102,69 +139,62 @@
         </div>
       </div>
 
-      <!-- 2. Impuestos -->
+      <!-- 3. Impuesto y tipo -->
       <div class="grid gap-4 px-6 py-5 lg:grid-cols-[13rem_1fr]">
         <div class="flex items-start gap-3">
-          <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-700 text-sm font-bold text-white">2</span>
+          <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-700 text-sm font-bold text-white">3</span>
           <div>
             <p class="font-semibold">Impuesto retenido</p>
-            <p class="text-sm text-muted">Y el tipo que admite ARCA</p>
+            <p class="text-sm text-muted">Uno por consulta, con su tipo</p>
           </div>
         </div>
         <div>
-          <div [class]="modoImpuestos() === 'auto' ? 'pointer-events-none opacity-45 select-none' : ''">
-            <app-selector-impuestos [impuestos]="f.impuestos" [(seleccion)]="impuestos" />
-          </div>
-
-          <!-- Detección automática -->
-          <label class="mt-3 flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors"
-                 [class]="modoImpuestos() === 'auto' ? 'border-brand-300 bg-brand-50' : 'border-line hover:border-brand-300'">
-            <input
-              type="checkbox"
-              [checked]="modoImpuestos() === 'auto'"
-              (change)="modoImpuestos.set($any($event.target).checked ? 'auto' : 'manual'); falta.set(null)"
-              class="mt-0.5 h-4 w-4 accent-brand-700"
-            />
-            <span class="text-sm">
-              <span class="flex items-center gap-1.5 font-semibold">
-                <svg class="h-4 w-4 text-brand-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z" />
-                </svg>
-                Detectar automáticamente según el Libro Mayor
-              </span>
-              <span class="mt-0.5 block text-muted">
-                En vez de los elegidos, el bot consulta los impuestos con cuenta de retenciones con movimientos en Xubio.
-              </span>
-            </span>
-          </label>
-
-          <!-- Tipo: se ajusta a lo que ARCA admite con el impuesto -->
-          <div class="mt-4">
-            <span class="mb-1.5 block text-sm font-medium">Tipo</span>
-            <div class="inline-flex flex-wrap rounded-lg border border-line bg-canvas p-1">
-              @for (t of tipos; track t.valor) {
-                @let permitido = tiposPermitidos().includes(t.valor);
-                <button
-                  type="button"
-                  (click)="tipo.set(t.valor)"
-                  [disabled]="!permitido"
-                  [title]="permitido ? '' : 'ARCA no admite este tipo con el impuesto elegido'"
-                  class="rounded-md px-3 py-1.5 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:text-muted/40 disabled:line-through"
-                  [class]="tipo() === t.valor ? 'bg-white text-brand-700 shadow-sm' : 'text-muted hover:text-ink'"
-                >
-                  {{ t.etiqueta }}
-                </button>
-              }
+          <div>
+              <app-selector-impuestos [impuestos]="f.impuestos" [(seleccion)]="impuestos" />
             </div>
-            @if (avisoTipo(); as aviso) {
-              <p class="mt-2 flex items-start gap-1.5 text-xs text-amber-700">
-                <svg class="mt-px h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 8h.01M12 11v5" /></svg>
-                {{ aviso }}
-              </p>
-            } @else if (modoImpuestos() === 'manual' && tiposPermitidos().length < tipos.length) {
-              <p class="mt-2 text-xs text-muted">Solo se habilitan los tipos que ARCA admite con el impuesto elegido.</p>
+
+            <!-- Tipo: retención, percepción o las dos, como el filtro de ARCA -->
+            @if (consultado(); as c) {
+              <div class="mt-3 rounded-xl border border-line p-3">
+                <p class="text-sm">
+                  <span class="font-mono text-xs font-semibold text-brand-700">{{ c.codigo }}</span>
+                  <span class="font-medium"> {{ c.nombre }}</span>
+                  <span class="text-muted"> · ¿qué traer?</span>
+                </p>
+                <div class="mt-2 flex flex-wrap gap-2" role="radiogroup" aria-label="Tipo">
+                  @for (t of c.tipos; track t.id) {
+                    <button
+                      type="button"
+                      role="radio"
+                      [attr.aria-checked]="tipo() === t.id"
+                      (click)="tipo.set(t.id)"
+                      class="flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm font-semibold transition-colors"
+                      [class]="tipo() === t.id ? 'border-brand-600 bg-brand-50 text-brand-800' : 'border-line bg-white text-ink hover:border-brand-300'"
+                    >
+                      <span class="flex h-3.5 w-3.5 items-center justify-center rounded-full border" [class]="tipo() === t.id ? 'border-brand-600' : 'border-brand-300'">
+                        @if (tipo() === t.id) {
+                          <span class="h-1.5 w-1.5 rounded-full bg-brand-600"></span>
+                        }
+                      </span>
+                      {{ t.etiqueta }}
+                    </button>
+                  }
+                </div>
+                <p class="mt-2 text-xs text-muted">
+                  @if (c.tipos.length === 1) {
+                    Con este impuesto ARCA solo admite «{{ c.tipos[0].etiqueta }}».
+                  } @else {
+                    Elegí «Retención» para dejar afuera las percepciones (o al revés), igual que el filtro de ARCA.
+                  }
+                </p>
+                <p class="mt-2 border-t border-line pt-2 text-sm">
+                  <span class="text-muted">Después, en Xubio:</span>
+                  Libro Mayor con las mismas fechas y, en «Cuenta», la de
+                  <span class="font-semibold">{{ cuentaABuscar() }}</span>
+                  que tenga el plan de cuentas.
+                </p>
+              </div>
             }
-          </div>
         </div>
       </div>
 
@@ -173,22 +203,10 @@
         <button type="button" (click)="avanzadas.update((v) => !v)" class="flex items-center gap-2 text-sm font-semibold text-brand-700">
           <svg class="h-4 w-4 transition-transform" [class.rotate-90]="avanzadas()" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6" /></svg>
           Más opciones
-          <span class="font-normal text-muted">· CUIT del retenido {{ cuitRetenido() }}{{ cuitAgente() ? ' · agente ' + cuitAgente() : '' }}</span>
+          <span class="font-normal text-muted">· {{ cuitAgente() ? 'agente ' + (cuitAgente() | cuit) : 'filtrar por agente' }}</span>
         </button>
         @if (avanzadas()) {
           <div class="mt-4 grid gap-4 md:grid-cols-2">
-            <label class="block">
-              <span class="mb-1 block text-sm font-medium">CUIT del retenido</span>
-              <select
-                [value]="cuitRetenido()"
-                (change)="cuitRetenido.set($any($event.target).value)"
-                class="w-full rounded-lg border border-line bg-white px-3 py-2 font-mono text-sm"
-              >
-                @for (cuit of f.cuits; track cuit) {
-                  <option [value]="cuit" [selected]="cuit === cuitRetenido()">{{ cuit }}</option>
-                }
-              </select>
-            </label>
             <label class="block">
               <span class="mb-1 block text-sm font-medium">CUIT del agente <span class="font-normal text-muted">(opcional)</span></span>
               <input
@@ -234,6 +252,11 @@
             </span>
           }
         </div>
+        <p class="mt-3 text-xs text-muted">
+          <span class="font-semibold text-ink">Traer y conciliar</span>: baja el Libro Mayor de Xubio, consulta ARCA y
+          cruza los dos. <span class="font-semibold text-ink">Solo consultar ARCA</span>: trae las retenciones sin
+          conciliar (para revisarlas o subir el mayor a mano).
+        </p>
 
         @if (consultandoArca() && !enCurso()) {
           <p class="mt-3 flex items-center gap-2 text-sm text-muted">

@@ -14,6 +14,8 @@ export interface ImpuestoArca {
   descripcion: string;
   /** Tipos que ARCA admite con este impuesto. Vacío = no se pudo saber (todos). */
   tipos?: TipoRetencion[];
+  /** "Ganancias", "IVA"... (null si no se reconoce): elige la cuenta de Xubio. */
+  impuesto?: string | null;
 }
 
 /** Opciones del formulario de Mis Retenciones, leídas por el bot en ARCA. */
@@ -54,6 +56,8 @@ export interface ConexionXubio {
   usuario: string | null;
   /** Hay una cuenta de Xubio en el .env del servidor: no hace falta cargarla. */
   cuenta_env: boolean;
+  /** La empresa con la que se entró a Xubio: de ella sale el Libro Mayor. */
+  empresa_activa?: string | null;
 }
 
 export interface Conexiones {

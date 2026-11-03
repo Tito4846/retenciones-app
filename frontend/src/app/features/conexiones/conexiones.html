@@ -45,7 +45,7 @@
     @switch (store.arca()?.estado) {
       @case ('conectado') {
         <p class="text-sm">
-          Conectado con la CUIT <span class="font-mono">{{ store.arca()?.cuit }}</span>.
+          Conectado con la CUIT <span class="font-mono">{{ store.arca()?.cuit | cuit }}</span>.
         </p>
         <p class="mt-2 text-sm text-muted">{{ store.arca()?.mensaje }}</p>
         <div class="mt-4 flex flex-wrap gap-3">

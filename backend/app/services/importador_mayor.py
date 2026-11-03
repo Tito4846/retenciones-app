@@ -17,7 +17,7 @@ import pandas as pd
 
 from app.core.config import settings
 from app.services.importador_tablas import _normalizar, leer_tabla, normalizar_columnas
-from app.services.impuestos import impuesto_de_texto
+from app.services.impuestos import impuesto_de_texto, tipo_de_texto
 from app.services.tools import (
     ErrorDeLectura,
     columna,
@@ -30,7 +30,8 @@ from app.services.tools import (
 
 logger = logging.getLogger(__name__)
 
-MARCAS_SALDO_INICIAL = ("SALDO INICIAL", "SALDO ANTERIOR", "TRANSPORTE")
+# Filas que traen el saldo del ejercicio anterior, no retenciones del periodo.
+MARCAS_SALDO_INICIAL = ("SALDO INICIAL", "SALDO ANTERIOR", "TRANSPORTE", "ASIENTO DE APERTURA", "APERTURA PATRIMONIAL")
 
 
 class LecturaMayor(NamedTuple):
@@ -90,7 +91,8 @@ def _desde_dataframe(df: pd.DataFrame, vacio_ok: bool = False) -> LecturaMayor:
 
     for _, fila in df.iterrows():
         descripcion = texto(columna(fila, "DETALLE")) or ""
-        if any(m in descripcion.upper() for m in MARCAS_SALDO_INICIAL):
+        documento = texto(columna(fila, "DOCUMENTO")) or texto(columna(fila, "COMPROBANTE"))
+        if any(m in f"{descripcion} {documento or ''}".upper() for m in MARCAS_SALDO_INICIAL):
             continue
 
         debe, haber = _importes(fila)
@@ -99,10 +101,11 @@ def _desde_dataframe(df: pd.DataFrame, vacio_ok: bool = False) -> LecturaMayor:
 
         fecha = parse_fecha(columna(fila, "FECHA"))
         if fecha is None:
+            # Todo asiento tiene fecha: lo demas son anotaciones a mano o totales.
             sin_fecha += 1
+            continue
 
         cuenta = texto(columna(fila, "CUENTA")) or ""
-        documento = texto(columna(fila, "DOCUMENTO")) or texto(columna(fila, "COMPROBANTE"))
         razon_social = texto(columna(fila, "RAZON_SOCIAL")) or ""
 
         movimiento = {
@@ -116,6 +119,8 @@ def _desde_dataframe(df: pd.DataFrame, vacio_ok: bool = False) -> LecturaMayor:
             # en la descripcion del asiento.
             "cuit": normalizar_cuit(columna(fila, "CUIT")) or cuit_en_texto(descripcion),
             "impuesto": impuesto_de_texto(cuenta, descripcion) or "",
+            # La cuenta dice si es de retenciones o de percepciones.
+            "tipo": tipo_de_texto(cuenta),
         }
         (retenciones if debe else aplicaciones).append(movimiento)
 
@@ -124,7 +129,7 @@ def _desde_dataframe(df: pd.DataFrame, vacio_ok: bool = False) -> LecturaMayor:
             "El Libro Mayor no tiene retenciones: ninguna fila con importe en el Debe."
         )
     if sin_fecha:
-        logger.warning("Libro Mayor: %d filas sin fecha reconocible", sin_fecha)
+        logger.warning("Libro Mayor: %d filas sin fecha se saltearon (anotaciones o totales)", sin_fecha)
     logger.info(
         "Libro Mayor: %d retenciones, %d aplicaciones/anulaciones",
         len(retenciones),
@@ -168,7 +173,19 @@ def _parsear_webreport(xml_texto: str) -> pd.DataFrame:
         datos.append(partes[1:])  # sin el PK
     if descartadas:
         logger.warning("Webreport: %d filas con cantidad de campos inesperada se descartaron", descartadas)
-    return pd.DataFrame(datos, columns=nombres)
+    df = pd.DataFrame(datos, columns=nombres)
+    # Solo las columnas que Xubio muestra en pantalla, con su titulo: las mismas
+    # del Excel que se exporta (Fecha, Documento, Cuenta, Debe, Haber, Saldo,
+    # Descripcion, Organizacion), asi se lee igual que el archivo. Las ocultas
+    # confunden: CUIT es el de la empresa y DETALLE no es la descripcion.
+    visibles = {
+        f.get("name"): f.get("caption") or f.get("name")
+        for f in dataset.find("fields").findall("field")
+        if (f.get("type") or "").upper() == "VISIBLE"
+    }
+    if visibles:
+        df = df[[n for n in nombres if n in visibles]].rename(columns=visibles)
+    return df
 
 
 def _palabras_de_filtro() -> list[str]:
@@ -181,13 +198,39 @@ def es_cuenta_de_retenciones(nombre: str) -> bool:
     return any(p in n for p in _palabras_de_filtro())
 
 
-def leer_mayor_desde_webreport(xml_texto: str, vacio_ok: bool = False) -> LecturaMayor:
+def solo_cuentas_de(mayor: LecturaMayor, impuestos: set[str]) -> tuple[LecturaMayor, int]:
+    """
+    El mayor de la cuenta de retenciones de los `impuestos` consultados en ARCA
+    ("Ganancias", "IVA"...), como cuando se baja el mayor de esa sola cuenta.
+    Las filas cuyo impuesto no se reconoce se dejan: puede ser la cuenta buscada
+    con otro nombre. Devuelve tambien cuantas filas quedaron afuera.
+    """
+    def es_de_la_cuenta(fila: dict) -> bool:
+        return not fila.get("impuesto") or fila["impuesto"] in impuestos
+
+    retenciones = [f for f in mayor.retenciones if es_de_la_cuenta(f)]
+    aplicaciones = [f for f in mayor.aplicaciones if es_de_la_cuenta(f)]
+    return LecturaMayor(retenciones, aplicaciones), len(mayor.retenciones) - len(retenciones)
+
+
+def solo_cuentas(mayor: LecturaMayor, cuentas: list[str]) -> tuple[LecturaMayor, int]:
+    """El mayor de esas cuentas de Xubio y cuantas filas de otras cuentas quedaron afuera."""
+    retenciones = [f for f in mayor.retenciones if f.get("cuenta") in cuentas]
+    aplicaciones = [f for f in mayor.aplicaciones if f.get("cuenta") in cuentas]
+    return LecturaMayor(retenciones, aplicaciones), len(mayor.retenciones) - len(retenciones)
+
+
+def leer_mayor_desde_webreport(xml_texto: str, vacio_ok: bool = False, cuenta: str | None = None) -> LecturaMayor:
     """
     El Libro Mayor que bajo el bot. Por defecto se pide el arbol de cuentas
     entero, asi que antes de leer se dejan solo las cuentas de retenciones.
     `vacio_ok`: un periodo sin movimientos de retenciones no es error.
+    `cuenta`: la cuenta elegida en la pantalla; el reporte de una sola cuenta
+    puede venir sin la columna Cuenta.
     """
     df = normalizar_columnas(_parsear_webreport(xml_texto))
+    if cuenta and not df.empty and "CUENTA" not in df.columns:
+        df["CUENTA"] = cuenta
     if df.empty:
         if vacio_ok:
             return LecturaMayor([], [])

@@ -34,16 +34,16 @@ export const NOMBRES_CORTOS: Record<string, string> = {
 export const SUGERIDOS = ['217', '767'];
 
 /**
- * Desplegable para elegir los impuestos de la consulta. ARCA consulta uno por
- * vez, pero el bot repite el formulario con cada uno de los elegidos. Tiene
- * buscador porque la lista es larga y los nombres de ARCA no se leen fácil.
+ * Desplegable para elegir el impuesto de la consulta: uno solo, como el combo
+ * de ARCA (elegir otro lo reemplaza). Tiene buscador porque la lista es larga
+ * y los nombres de ARCA no se leen fácil.
  */
 @Component({
   selector: 'app-selector-impuestos',
   templateUrl: './selector-impuestos.html',
   host: {
     '(document:click)': 'alClicAfuera($event)',
-    '(keydown.escape)': 'cerrar()',
+    '(document:keydown.escape)': 'cerrar()',
   },
 })
 export class SelectorImpuestos {
@@ -104,15 +104,19 @@ export class SelectorImpuestos {
     this.filtro.set('');
   }
 
+  /**
+   * Por el camino del evento y no por `contains`: al marcar o desmarcar, el
+   * tilde que se tocó se redibuja antes de que llegue el clic al documento, y
+   * ese elemento ya no está dentro del selector.
+   */
   protected alClicAfuera(event: MouseEvent): void {
-    if (this.abierto() && !this.elemento.nativeElement.contains(event.target as Node)) this.cerrar();
+    if (this.abierto() && !event.composedPath().includes(this.elemento.nativeElement)) this.cerrar();
   }
 
-  /** Agrega o saca un impuesto. La lista queda abierta para elegir varios. */
+  /** Como en ARCA, un impuesto por consulta: elegir otro reemplaza al anterior. */
   protected cambiar(codigo: string): void {
-    this.seleccion.update((actual) =>
-      actual.includes(codigo) ? actual.filter((c) => c !== codigo) : [...actual, codigo],
-    );
+    this.seleccion.set([codigo]);
+    this.cerrar();
   }
 
   protected quitar(codigo: string, event: Event): void {
@@ -120,11 +124,10 @@ export class SelectorImpuestos {
     this.seleccion.update((actual) => actual.filter((c) => c !== codigo));
   }
 
-  /** Enter en el buscador agrega el primero que coincide. */
+  /** Enter en el buscador elige el primero que coincide. */
   protected elegirPrimero(event: Event): void {
     event.preventDefault();
     const primero = this.visibles()[0];
-    if (primero && !this.estaElegido(primero.codigo)) this.cambiar(primero.codigo);
-    this.filtro.set('');
+    if (primero) this.cambiar(primero.codigo);
   }
 }

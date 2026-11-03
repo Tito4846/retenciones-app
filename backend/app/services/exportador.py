@@ -7,10 +7,11 @@ logo en A1:B3) para que los dos papeles se lean igual. A diferencia del
 bancario no hay plantilla de auditoria: el membrete se escribe aca.
 
 Hojas:
-    Resumen            cantidades e importes por bandeja y por impuesto.
-    Conciliados        ARCA + asiento del mayor, con el criterio del par.
-    Falta certificado  asientos del mayor sin retencion en ARCA.
-    No declarados      retenciones de ARCA sin asiento en el mayor.
+    Resumen            A/B/C con cantidad y monto, los primeros casos de B y C
+                       y los totales por impuesto.
+    Conciliados        A: ARCA + asiento del Libro Mayor, con la clave del cruce.
+    Faltan_en_ARCA     B: registradas en el Libro Mayor de Xubio sin certificado en ARCA (reclamo).
+    Faltan_en_Mayor      C: declaradas en ARCA sin registrar en el Libro Mayor de Xubio (ajuste).
 """
 
 from __future__ import annotations
@@ -54,14 +55,18 @@ ALINEACION_CENTRO = Alignment(horizontal="center", vertical="center")
 ALINEACION_DERECHA = Alignment(horizontal="right", shrink_to_fit=True)
 BORDE_DOBLE = Border(top=Side(style="thin"), bottom=Side(style="double"))
 
+# Casos de B y C que se muestran en el resumen (el detalle completo, en su hoja).
+CASOS_EN_RESUMEN = 10
+
 ESTADO_CONCILIADO = "Conciliado"
 ESTADO_SIN_COINCIDENCIA = "Sin coincidencia"
 
 ETIQUETAS_CRITERIO = {
-    "certificado": "Nro. de certificado",
-    "cuit": "CUIT + importe + fecha",
+    "comprobante": "Nro. de comprobante",
+    "cuit_importe": "CUIT + importe",
     "razon_social": "Razón social + importe + fecha",
     "importe_fecha": "Importe + fecha",
+    "diferencia_menor": "Mismo agente, centavos de diferencia",
     "manual": "Conciliado a mano",
 }
 
@@ -230,33 +235,36 @@ def _armar_conciliados(hoja: Worksheet, filas: list[dict]) -> None:
     )
 
 
-def _armar_falta_certificado(hoja: Worksheet, filas: list[dict]) -> None:
+def _armar_faltan_en_arca(hoja: Worksheet, filas: list[dict]) -> None:
     _armar_tabla(
         hoja,
         ["Fecha", "CUIT", "Organización", "Impuesto", "Cuenta", "Documento",
-         "Descripción", "Importe", "Estado"],
-        [12, 16, 34, 16, 32, 22, 40, 16, 18],
+         "Descripción", "Importe", "Estado", "Nota"],
+        [12, 16, 34, 16, 32, 22, 40, 16, 18, 60],
         [
             [_fecha(f["fecha"]), f["cuit"], f["razon_social"], f["impuesto"], f.get("cuenta"),
-             f.get("documento"), f.get("descripcion"), _importe(f["importe"]), ESTADO_SIN_COINCIDENCIA]
+             f.get("documento"), f.get("descripcion"), _importe(f["importe"]), ESTADO_SIN_COINCIDENCIA,
+             f.get("nota")]
             for f in filas
         ],
         columna_importe=7,
     )
 
 
-def _armar_no_declarados(hoja: Worksheet, filas: list[dict]) -> None:
+def _armar_faltan_en_mayor(hoja: Worksheet, filas: list[dict]) -> None:
     _armar_tabla(
         hoja,
-        ["Fecha", "CUIT agente", "Razón social", "Impuesto", "Régimen", "Certificado",
-         "Importe", "Estado"],
-        [12, 16, 34, 16, 28, 18, 16, 18],
+        ["Fecha", "CUIT agente", "Razón social", "Impuesto", "Tipo", "Régimen", "Certificado",
+         "Comprobante", "Importe", "Estado", "Nota"],
+        [12, 16, 34, 16, 12, 28, 18, 20, 16, 18, 60],
         [
-            [_fecha(f["fecha"]), f["cuit"], f["razon_social"], f["impuesto"], f.get("regimen"),
-             f.get("certificado"), _importe(f["importe"]), ESTADO_SIN_COINCIDENCIA]
+            [_fecha(f["fecha"]), f["cuit"], f["razon_social"], f["impuesto"],
+             {"Retencion": "Retención", "Percepcion": "Percepción"}.get(f.get("tipo") or "", ""),
+             f.get("regimen"), f.get("certificado"), f.get("comprobante"), _importe(f["importe"]),
+             ESTADO_SIN_COINCIDENCIA, f.get("nota")]
             for f in filas
         ],
-        columna_importe=6,
+        columna_importe=8,
     )
 
 
@@ -268,11 +276,15 @@ def _armar_resumen(hoja: Worksheet, resultado: dict) -> None:
     _ajustar_anchos(hoja, [22, 14, 20, 20, 20])
     detalle = resultado["detalle"]
 
-    _escribir_encabezados(hoja, FILA_ENCABEZADO, ["Bandeja", "Cantidad", "Importe"])
+    # Si los dos archivos no son del mismo mes o impuesto, que se vea antes que los numeros.
+    for k, aviso in enumerate(resultado.get("avisos") or []):
+        celda = hoja.cell(row=FILA_TITULO + 1 + k, column=3, value=f"⚠ {aviso}")
+        celda.font = Font(name="Calibri", size=10, bold=True, color="FF9C5700")
+    _escribir_encabezados(hoja, FILA_ENCABEZADO, ["Categoría", "Cantidad", "Importe"])
     bandejas = [
-        ("Conciliados", "conciliados", "Conciliados"),
-        ("Falta certificado", "falta_certificado", "'Falta certificado'"),
-        ("No declarados", "no_declarados", "'No declarados'"),
+        ("A · Conciliados", "conciliados", "Conciliados"),
+        ("B · Faltan en ARCA", "faltan_en_arca", "Faltan_en_ARCA"),
+        ("C · Faltan en el Mayor", "faltan_en_mayor", "Faltan_en_Mayor"),
     ]
     for k, (etiqueta, clave, hoja_ref) in enumerate(bandejas):
         fila = FILA_PRIMER_DATO + k
@@ -289,7 +301,7 @@ def _armar_resumen(hoja: Worksheet, resultado: dict) -> None:
     resumen = resultado.get("resumen", {})
     fila_control = FILA_PRIMER_DATO + len(bandejas) + 1
     for k, (etiqueta, clave) in enumerate(
-        [("Informado en ARCA", "importe_arca"), ("Registrado en el mayor", "importe_mayor"), ("Diferencia", "diferencia")]
+        [("Informado en ARCA", "importe_arca"), ("Registrado en el Libro Mayor de Xubio", "importe_mayor"), ("Diferencia", "diferencia")]
     ):
         _escribir_fila(
             hoja, fila_control + k, [etiqueta, None, _importe(resumen.get(clave))], {2},
@@ -301,23 +313,46 @@ def _armar_resumen(hoja: Worksheet, resultado: dict) -> None:
     hoja.cell(row=fila_imp - 1, column=1, value="Por impuesto").font = FUENTE_NEGRITA
     _escribir_encabezados(
         hoja, fila_imp,
-        ["Impuesto", "Cantidad", "ARCA", "Mayor", "Diferencia", "Conciliado", "Falta certificado", "No declarado"],
+        ["Impuesto", "Cantidad", "ARCA", "Libro Mayor", "Diferencia", "Conciliado", "Faltan en ARCA", "Faltan en el Mayor"],
     )
     _ajustar_anchos(hoja, [22, 14, 18, 18, 18, 18, 18, 18])
     for k, f in enumerate(resultado.get("por_impuesto") or _por_impuesto_desde_detalle(detalle)):
         _escribir_fila(
             hoja, fila_imp + 1 + k,
             [f["impuesto"], f["cantidad_arca"], f["importe_arca"], f["importe_mayor"], f["diferencia"],
-             f["conciliado"], f["falta_certificado"], f["no_declarado"]],
+             f["conciliado"], f["faltan_en_arca"], f["faltan_en_mayor"]],
             {2, 3, 4, 5, 6, 7},
         )
+    fila = fila_imp + 2 + len(resultado.get("por_impuesto") or _por_impuesto_desde_detalle(detalle))
+
+    # Los primeros casos de B y C: lo que hay que reclamar o ajustar.
+    for titulo, filas, columnas, valores in (
+        (f"B · Faltan en ARCA (primeros {CASOS_EN_RESUMEN})", detalle["faltan_en_arca"],
+         ["Fecha", "CUIT", "Organización", "Impuesto", "Documento", "Importe"],
+         lambda f: [_fecha(f["fecha"]), f["cuit"], f["razon_social"], f["impuesto"], f.get("documento"),
+                    _importe(f["importe"])]),
+        (f"C · Faltan en el Mayor (primeros {CASOS_EN_RESUMEN})", detalle["faltan_en_mayor"],
+         ["Fecha", "CUIT agente", "Razón social", "Impuesto", "Certificado", "Importe"],
+         lambda f: [_fecha(f["fecha"]), f["cuit"], f["razon_social"], f["impuesto"], f.get("certificado"),
+                    _importe(f["importe"])]),
+    ):
+        fila += 1
+        hoja.cell(row=fila, column=1, value=titulo).font = FUENTE_NEGRITA
+        _escribir_encabezados(hoja, fila + 1, columnas)
+        fila += 2
+        if not filas:
+            hoja.cell(row=fila, column=1, value="Sin casos.")
+            fila += 1
+        for f in filas[:CASOS_EN_RESUMEN]:
+            _escribir_fila(hoja, fila, valores(f), {5})
+            fila += 1
 
 
 def _por_impuesto_desde_detalle(detalle: dict) -> list[dict]:
     """Para resultados sin `por_impuesto` (los arma el conciliador): mismos totales desde el detalle."""
     filas: dict[str, dict] = defaultdict(
         lambda: {"cantidad_arca": 0, "importe_arca": 0.0, "importe_mayor": 0.0,
-                 "conciliado": 0.0, "falta_certificado": 0.0, "no_declarado": 0.0}
+                 "conciliado": 0.0, "faltan_en_arca": 0.0, "faltan_en_mayor": 0.0}
     )
     for f in detalle["conciliados"]:
         d = filas[f.get("impuesto") or "Sin identificar"]
@@ -325,15 +360,15 @@ def _por_impuesto_desde_detalle(detalle: dict) -> list[dict]:
         d["importe_arca"] += _importe(f["importe"])
         d["importe_mayor"] += _importe(f.get("importe_mayor", f["importe"]))
         d["conciliado"] += _importe(f["importe"])
-    for f in detalle["falta_certificado"]:
+    for f in detalle["faltan_en_arca"]:
         d = filas[f.get("impuesto") or "Sin identificar"]
         d["importe_mayor"] += _importe(f["importe"])
-        d["falta_certificado"] += _importe(f["importe"])
-    for f in detalle["no_declarados"]:
+        d["faltan_en_arca"] += _importe(f["importe"])
+    for f in detalle["faltan_en_mayor"]:
         d = filas[f.get("impuesto") or "Sin identificar"]
         d["cantidad_arca"] += 1
         d["importe_arca"] += _importe(f["importe"])
-        d["no_declarado"] += _importe(f["importe"])
+        d["faltan_en_mayor"] += _importe(f["importe"])
     return [
         {"impuesto": k, **v, "diferencia": round(v["importe_arca"] - v["importe_mayor"], 2)}
         for k, v in sorted(filas.items())
@@ -370,11 +405,11 @@ def exportar(resultado: dict, empresa: str | None = None, hoy: date | None = Non
     libro = Workbook()
     hojas = [
         ("Resumen", "Conciliación de Retenciones ARCA", lambda h: _armar_resumen(h, resultado)),
-        ("Conciliados", "Retenciones conciliadas", lambda h: _armar_conciliados(h, detalle["conciliados"])),
-        ("Falta certificado", "Registradas en el mayor sin certificado en ARCA",
-         lambda h: _armar_falta_certificado(h, detalle["falta_certificado"])),
-        ("No declarados", "Informadas en ARCA sin registrar en el mayor",
-         lambda h: _armar_no_declarados(h, detalle["no_declarados"])),
+        ("Conciliados", "A · Retenciones conciliadas", lambda h: _armar_conciliados(h, detalle["conciliados"])),
+        ("Faltan_en_ARCA", "B · Registradas en el Libro Mayor de Xubio que no figuran en ARCA",
+         lambda h: _armar_faltan_en_arca(h, detalle["faltan_en_arca"])),
+        ("Faltan_en_Mayor", "C · Declaradas en ARCA sin registrar en el Libro Mayor de Xubio",
+         lambda h: _armar_faltan_en_mayor(h, detalle["faltan_en_mayor"])),
     ]
     if resultado.get("sugerencias"):
         hojas.append(

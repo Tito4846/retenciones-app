@@ -9,7 +9,7 @@
     <div>
       <h1 class="text-2xl font-semibold">Conciliación de retenciones</h1>
       <p class="mt-1 text-muted">
-        ARCA (Mis Retenciones) contra el Libro Mayor de Xubio.
+        Mis Retenciones de ARCA contra el Libro Mayor de Xubio: cruce por número de comprobante y, si no cruza, por CUIT del agente + importe.
         @if (store.resumen(); as r) {
           <span class="whitespace-nowrap">
             Tolerancia de {{ r.tolerancia_dias }} días{{ r.hasta_periodo ? ' · período hasta el ' + (r.hasta_periodo | date: 'dd/MM/yyyy') : '' }}.
@@ -47,7 +47,18 @@
 }
 
 @if (store.resumen(); as r) {
-  <!-- Control ARCA vs. mayor -->
+  @if (store.avisos().length) {
+    <section class="mb-6 rounded-2xl border border-amber-300 bg-amber-50 p-5">
+      <p class="font-semibold text-amber-900">Revisá que los dos archivos sean del mismo cruce</p>
+      <ul class="mt-2 list-disc space-y-1 pl-5 text-sm text-amber-900">
+        @for (aviso of store.avisos(); track aviso) {
+          <li>{{ aviso }}</li>
+        }
+      </ul>
+    </section>
+  }
+
+  <!-- Control ARCA vs. Libro Mayor -->
   <section class="mb-6 rounded-2xl border border-line bg-white p-6">
     <div class="grid gap-6 md:grid-cols-3">
       <div>
@@ -56,7 +67,7 @@
         <p class="mt-0.5 text-sm text-muted">{{ r.total_arca }} retenciones</p>
       </div>
       <div>
-        <p class="text-sm text-muted">Registrado en el mayor</p>
+        <p class="text-sm text-muted">Registrado en el Libro Mayor de Xubio</p>
         <p class="mt-1 text-2xl font-semibold tabular-nums">{{ r.importe_mayor ?? 0 | currency: 'ARS' : 'symbol-narrow' }}</p>
         <p class="mt-0.5 text-sm text-muted">
           {{ r.total_mayor }} asientos
@@ -66,7 +77,7 @@
         </p>
       </div>
       <div>
-        <p class="text-sm text-muted">Diferencia ARCA − mayor</p>
+        <p class="text-sm text-muted">Diferencia ARCA − Mayor</p>
         @let dif = r.diferencia ?? 0;
         <p class="mt-1 text-2xl font-semibold tabular-nums" [class]="dif === 0 ? 'text-emerald-700' : 'text-red-600'">
           {{ dif | currency: 'ARS' : 'symbol-narrow' }}
@@ -77,7 +88,7 @@
           } @else if (dif > 0) {
             ARCA informa más de lo registrado
           } @else {
-            El mayor tiene más de lo que informa ARCA
+            El Libro Mayor tiene más de lo que informa ARCA
           }
         </p>
       </div>
@@ -91,11 +102,11 @@
       </div>
       <div class="flex h-2.5 w-full overflow-hidden rounded-full bg-canvas">
         <div class="h-full bg-emerald-500 transition-all" [style.width.%]="avance() * 100"></div>
-        <div class="h-full bg-red-400 transition-all" [style.width.%]="r.importe_arca ? (r.importe_no_declarado / r.importe_arca) * 100 : 0"></div>
+        <div class="h-full bg-red-400 transition-all" [style.width.%]="r.importe_arca ? (r.importe_faltan_en_mayor / r.importe_arca) * 100 : 0"></div>
       </div>
       <div class="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted">
-        <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-emerald-500"></span>Conciliado {{ r.importe_conciliado | currency: 'ARS' : 'symbol-narrow' }}</span>
-        <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-red-400"></span>No declarado {{ r.importe_no_declarado | currency: 'ARS' : 'symbol-narrow' }}</span>
+        <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-emerald-500"></span>A · Conciliados {{ r.importe_conciliado | currency: 'ARS' : 'symbol-narrow' }}</span>
+        <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-red-400"></span>C · Faltan en el Mayor {{ r.importe_faltan_en_mayor | currency: 'ARS' : 'symbol-narrow' }}</span>
         @if (r.total_manuales) {
           <span>{{ r.total_manuales }} conciliada/s a mano</span>
         }
@@ -122,7 +133,12 @@
             : 'border-line'"
         >
           <div class="flex items-center justify-between gap-2">
-            <span class="text-sm font-semibold">{{ p.titulo }}</span>
+            <span class="flex items-center gap-2 text-sm font-semibold">
+              @if (p.letra) {
+                <span class="flex h-5 w-5 items-center justify-center rounded-md bg-canvas text-xs font-bold text-muted">{{ p.letra }}</span>
+              }
+              {{ p.titulo }}
+            </span>
             <span
               class="h-2.5 w-2.5 rounded-full"
               [class]="p.tono === 'rojo' ? 'bg-red-500' : p.tono === 'ambar' ? 'bg-amber-500' : p.tono === 'verde' ? 'bg-emerald-500' : 'bg-brand-600'"
@@ -141,6 +157,64 @@
     }
   </div>
 
+  <!-- Primeros casos de B y C -->
+  <div class="mb-6 grid gap-4 xl:grid-cols-2">
+    @for (bloque of primerosCasos(); track bloque.config.id) {
+      <section class="overflow-hidden rounded-2xl border border-line bg-white">
+        <div class="flex items-start justify-between gap-3 px-5 pt-4 pb-3">
+          <div>
+            <h2 class="font-semibold">{{ bloque.config.letra }} · {{ bloque.config.titulo }}</h2>
+            <p class="text-xs text-muted">
+              @if (bloque.total > casosEnResumen) {
+                Primeros {{ casosEnResumen }} de {{ bloque.total }} ·
+              }
+              {{ bloque.config.accion }}
+            </p>
+          </div>
+          @if (bloque.total) {
+            <button type="button" (click)="elegirPestana(bloque.config.id)" class="shrink-0 rounded-md px-2 py-1 text-xs font-semibold text-brand-700 hover:bg-brand-50">
+              Ver todos
+            </button>
+          }
+        </div>
+        @if (bloque.filas.length) {
+          <div class="overflow-x-auto">
+            <table class="min-w-full text-sm whitespace-nowrap">
+              <thead class="border-y border-line bg-canvas/60 text-left text-xs tracking-wider text-muted uppercase">
+                <tr>
+                  <th class="px-5 py-2 font-semibold">Fecha</th>
+                  <th class="px-3 py-2 font-semibold">{{ bloque.config.id === 'faltan_en_arca' ? 'Organización' : 'Agente' }}</th>
+                  <th class="px-3 py-2 font-semibold">{{ bloque.config.id === 'faltan_en_arca' ? 'Documento' : 'Certificado' }}</th>
+                  <th class="px-5 py-2 text-right font-semibold">Importe</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-line">
+                @for (f of bloque.filas; track f.id ?? $index) {
+                  <tr>
+                    <td class="px-5 py-2 tabular-nums">{{ f.fecha | date: 'dd/MM/yyyy' }}</td>
+                    <td class="max-w-56 truncate px-3 py-2">
+                      {{ f.razon_social || '—' }}
+                      @if (f.cuit) {
+                        <span class="block text-xs text-muted tabular-nums">{{ f.cuit }}</span>
+                      }
+                      @if (f.nota) {
+                        <span class="block text-xs whitespace-normal text-amber-700">{{ f.nota }}</span>
+                      }
+                    </td>
+                    <td class="px-3 py-2 font-mono text-xs">{{ (bloque.config.id === 'faltan_en_arca' ? f.documento : f.certificado) || '—' }}</td>
+                    <td class="px-5 py-2 text-right font-semibold tabular-nums">{{ f.importe | currency: 'ARS' : 'symbol-narrow' }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        } @else {
+          <p class="border-t border-line px-5 py-6 text-center text-sm text-emerald-700">✓ {{ bloque.config.vacio }}</p>
+        }
+      </section>
+    }
+  </div>
+
   <!-- Por impuesto -->
   @if (store.porImpuesto().length) {
     <section class="mb-6 overflow-hidden rounded-2xl border border-line bg-white">
@@ -154,7 +228,7 @@
             <tr>
               <th class="px-6 py-2.5 font-semibold">Impuesto</th>
               <th class="px-4 py-2.5 text-right font-semibold">ARCA</th>
-              <th class="px-4 py-2.5 text-right font-semibold">Mayor</th>
+              <th class="px-4 py-2.5 text-right font-semibold">Libro Mayor</th>
               <th class="px-4 py-2.5 text-right font-semibold">Diferencia</th>
               <th class="px-6 py-2.5 font-semibold">Conciliado</th>
             </tr>
@@ -195,7 +269,7 @@
   <section class="rounded-2xl border border-line bg-white">
     <div class="flex flex-wrap items-start justify-between gap-3 px-6 pt-5">
       <div>
-        <h2 class="text-lg font-semibold">{{ config().titulo }}</h2>
+        <h2 class="text-lg font-semibold">{{ config().letra ? config().letra + ' · ' : '' }}{{ config().titulo }}</h2>
         <p class="text-sm text-muted">{{ config().significado }} · <span class="font-medium text-ink">{{ config().accion }}</span></p>
       </div>
       <div class="flex flex-wrap gap-1 rounded-lg border border-line bg-canvas p-1">
@@ -207,7 +281,7 @@
               class="rounded-md px-3 py-1.5 text-sm font-semibold transition-colors"
               [class]="pestanaActiva() === p.id ? 'bg-white text-brand-700 shadow-sm' : 'text-muted hover:text-ink'"
             >
-              {{ p.titulo }} <span class="font-normal">({{ cantidad(p.id) }})</span>
+              {{ p.letra ? p.letra + ' · ' : '' }}{{ p.titulo }} <span class="font-normal">({{ cantidad(p.id) }})</span>
             </button>
           }
         }
@@ -252,7 +326,7 @@
               </div>
             </div>
             <div class="grid gap-px bg-line md:grid-cols-2">
-              @for (lado of [{ t: 'ARCA', f: s.arca, ref: s.arca.certificado, refT: 'Cert.' }, { t: 'Mayor', f: s.mayor, ref: s.mayor.documento, refT: 'Doc.' }]; track lado.t) {
+              @for (lado of [{ t: 'ARCA', f: s.arca, ref: s.arca.certificado, refT: 'Cert.' }, { t: 'Libro Mayor', f: s.mayor, ref: s.mayor.documento, refT: 'Doc.' }]; track lado.t) {
                 <div class="bg-white px-4 py-3 text-sm">
                   <p class="mb-1 text-xs font-semibold tracking-wider text-muted uppercase">{{ lado.t }}</p>
                   <div class="flex items-start justify-between gap-3">
@@ -316,7 +390,7 @@
               </th>
               <th class="px-4 py-3 font-semibold">
                 <button type="button" (click)="ordenarPor('razon_social')" class="uppercase hover:text-ink">
-                  {{ pestanaActiva() === 'falta_certificado' ? 'Organización' : 'Agente' }} {{ flecha('razon_social') }}
+                  {{ pestanaActiva() === 'faltan_en_arca' ? 'Organización' : 'Agente' }} {{ flecha('razon_social') }}
                 </button>
               </th>
               <th class="px-4 py-3 font-semibold">
@@ -328,11 +402,11 @@
                   <th class="px-4 py-3 font-semibold">Asiento</th>
                   <th class="px-4 py-3 font-semibold">Criterio</th>
                 }
-                @case ('no_declarados') {
+                @case ('faltan_en_mayor') {
                   <th class="px-4 py-3 font-semibold">Certificado</th>
                   <th class="px-4 py-3 font-semibold">Régimen</th>
                 }
-                @case ('falta_certificado') {
+                @case ('faltan_en_arca') {
                   <th class="px-4 py-3 font-semibold">Cuenta</th>
                   <th class="px-4 py-3 font-semibold">Documento</th>
                 }
@@ -340,7 +414,7 @@
               <th class="px-4 py-3 text-right font-semibold">
                 <button type="button" (click)="ordenarPor('importe')" class="uppercase hover:text-ink">Importe {{ flecha('importe') }}</button>
               </th>
-              @if (pestanaActiva() === 'no_declarados') {
+              @if (pestanaActiva() === 'faltan_en_mayor') {
                 <th class="px-4 py-3"></th>
               }
             </tr>
@@ -354,8 +428,16 @@
                   @if (item.cuit) {
                     <p class="font-mono text-xs text-muted">{{ item.cuit }}</p>
                   }
+                  @if (item.nota) {
+                    <p class="mt-0.5 text-xs whitespace-normal text-amber-700">{{ item.nota }}</p>
+                  }
                 </td>
-                <td class="px-4 py-3">{{ item.impuesto || '—' }}</td>
+                <td class="px-4 py-3">
+                  {{ item.impuesto || '—' }}
+                  @if (item.tipo) {
+                    <span class="block text-xs text-muted">{{ item.tipo === 'Percepcion' ? 'Percepción' : 'Retención' }}</span>
+                  }
+                </td>
                 @switch (pestanaActiva()) {
                   @case ('conciliados') {
                     <td class="px-4 py-3 font-mono text-xs">{{ item.certificado || '—' }}</td>
@@ -387,11 +469,11 @@
                       }
                     </td>
                   }
-                  @case ('no_declarados') {
+                  @case ('faltan_en_mayor') {
                     <td class="px-4 py-3 font-mono text-xs">{{ item.certificado || '—' }}</td>
                     <td class="max-w-56 truncate px-4 py-3 text-xs text-muted" [title]="item.regimen ?? ''">{{ item.regimen || '—' }}</td>
                   }
-                  @case ('falta_certificado') {
+                  @case ('faltan_en_arca') {
                     <td class="max-w-56 truncate px-4 py-3 text-xs" [title]="item.cuenta ?? ''">{{ item.cuenta || '—' }}</td>
                     <td class="max-w-64 px-4 py-3">
                       <p class="font-mono text-xs">{{ item.documento || '—' }}</p>
@@ -407,13 +489,13 @@
                     <span class="block text-xs font-normal text-amber-700">mayor {{ item.importe_mayor | currency: 'ARS' : 'symbol-narrow' }}</span>
                   }
                 </td>
-                @if (pestanaActiva() === 'no_declarados') {
+                @if (pestanaActiva() === 'faltan_en_mayor') {
                   <td class="px-4 py-3 text-right">
                     <button
                       type="button"
                       (click)="abrirEmparejar(item)"
-                      [disabled]="!cantidad('falta_certificado') || !!store.emparejando()"
-                      [title]="cantidad('falta_certificado') ? 'Conciliar con un asiento del mayor' : 'No hay asientos sin certificado para emparejar'"
+                      [disabled]="!cantidad('faltan_en_arca') || !!store.emparejando()"
+                      [title]="cantidad('faltan_en_arca') ? 'Conciliar con un asiento del mayor' : 'No hay asientos sin certificado para emparejar'"
                       class="rounded-lg border border-line px-3 py-1.5 text-xs font-semibold transition-colors hover:bg-canvas disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       Emparejar…

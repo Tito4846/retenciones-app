@@ -45,6 +45,20 @@ def impuesto_de_texto(*textos) -> str | None:
     return None
 
 
+def tipo_de_texto(*textos) -> str:
+    """
+    'RETENCION' / 'Percepción de Ganancias Sufrida' -> 'Retencion' / 'Percepcion';
+    '' si no se reconoce. ARCA lo dice en "Descripción Operación"; en el mayor,
+    el nombre de la cuenta.
+    """
+    for t in textos:
+        n = _normalizar(t or "")
+        reten, percep = "RETEN" in n, "PERCEP" in n
+        if reten != percep:
+            return "Retencion" if reten else "Percepcion"
+    return ""
+
+
 def _palabras(texto) -> list[str]:
     sin_acentos = unicodedata.normalize("NFKD", str(texto)).encode("ascii", "ignore").decode()
     return re.findall(r"[A-Z0-9]+", sin_acentos.upper())

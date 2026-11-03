@@ -1,11 +1,12 @@
 import { DatePipe } from '@angular/common';
 import { Component, DestroyRef, afterNextRender, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
+import { CuitPipe } from '../../core/cuit.pipe';
 import { ConexionesStore } from '../../core/services/conexiones.store';
 
 @Component({
   selector: 'app-conexiones',
-  imports: [DatePipe, RouterLink],
+  imports: [CuitPipe, DatePipe, RouterLink],
   templateUrl: './conexiones.html',
 })
 export class Conexiones {

@@ -1,5 +1,7 @@
+import io
 from urllib.parse import unquote
 
+import openpyxl
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -24,7 +26,7 @@ def test_flujo_completo_con_exportacion(ruta_arca, ruta_mayor, leer_hoja):
     estado = cliente.get(f"/api/estado/{task_id}").json()
     assert estado["status"] == "completado"
     assert estado["resumen"]["total_conciliados"] == 2
-    assert set(estado["detalle"]) == {"conciliados", "falta_certificado", "no_declarados"}
+    assert set(estado["detalle"]) == {"conciliados", "faltan_en_arca", "faltan_en_mayor"}
 
     excel = cliente.get(f"/api/exportar/{task_id}", params={"empresa": "Piccinini & Asoc."})
     assert excel.status_code == 200
@@ -32,8 +34,11 @@ def test_flujo_completo_con_exportacion(ruta_arca, ruta_mayor, leer_hoja):
 
     conciliados = leer_hoja(excel.content, "Conciliados")
     assert list(conciliados["Importe"].dropna())[:2] == [32110.0, 16100.0]
-    no_declarados = leer_hoja(excel.content, "No declarados")
-    assert set(no_declarados["Estado"].dropna()) == {"Sin coincidencia"}
+    faltan_en_mayor = leer_hoja(excel.content, "Faltan_en_Mayor")
+    assert set(faltan_en_mayor["Estado"].dropna()) == {"Sin coincidencia"}
+    assert openpyxl.load_workbook(io.BytesIO(excel.content)).sheetnames[:4] == [
+        "Resumen", "Conciliados", "Faltan_en_ARCA", "Faltan_en_Mayor"]
+    assert [c["categoria"] for c in estado["categorias"]] == ["A", "B", "C"]
 
 
 def test_archivo_ilegible_termina_en_error(tmp_path, ruta_mayor):

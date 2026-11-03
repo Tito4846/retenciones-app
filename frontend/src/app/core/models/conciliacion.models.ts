@@ -1,4 +1,11 @@
-export type CriterioConciliacion = 'certificado' | 'cuit' | 'razon_social' | 'importe_fecha' | 'manual';
+/** La clave con que se cruzó: comprobante (principal), CUIT + importe (secundaria) o las de respaldo. */
+export type CriterioConciliacion =
+  | 'comprobante'
+  | 'cuit_importe'
+  | 'razon_social'
+  | 'importe_fecha'
+  | 'diferencia_menor'
+  | 'manual';
 
 /** Un comprobante de retención/percepción tal como lo devuelve el backend. */
 export interface Retencion {
@@ -13,6 +20,12 @@ export interface Retencion {
   /** Número de certificado de ARCA (conciliados y no declarados). */
   certificado?: string | null;
   regimen?: string | null;
+  /** Comprobante del agente (factura, orden de pago) que informa ARCA. */
+  comprobante?: string | null;
+  /** 'Retencion' o 'Percepcion' (de ARCA o del nombre de la cuenta del mayor). */
+  tipo?: string;
+  /** Por qué quedó sin par y qué hacer (posterior a ARCA, va en otra cuenta…). */
+  nota?: string | null;
   /** Documento, cuenta y descripción del asiento en Xubio (falta certificado). */
   documento?: string | null;
   cuenta?: string | null;
@@ -30,13 +43,13 @@ export interface Retencion {
 
 export interface ResumenConciliacion {
   total_conciliados: number;
-  total_falta_certificado: number;
-  total_no_declarados: number;
+  total_faltan_en_arca: number;
+  total_faltan_en_mayor: number;
   total_manuales?: number;
   total_sugerencias?: number;
   importe_conciliado: number;
-  importe_falta_certificado: number;
-  importe_no_declarado: number;
+  importe_faltan_en_arca: number;
+  importe_faltan_en_mayor: number;
   /** Lo que informa ARCA, lo registrado en el mayor y la diferencia. */
   importe_arca?: number;
   importe_mayor?: number;
@@ -61,8 +74,8 @@ export interface ImpuestoConciliado {
   importe_mayor: number;
   diferencia: number;
   conciliado: number;
-  falta_certificado: number;
-  no_declarado: number;
+  faltan_en_arca: number;
+  faltan_en_mayor: number;
 }
 
 /** Un par que el cruce no hizo solo pero que probablemente sea la misma retención. */
@@ -80,10 +93,21 @@ export interface Sugerencia {
 /** Paso del flujo automático que está corriendo en el backend. */
 export type PasoAutomatico = 'xubio' | 'arca' | 'cruce';
 
+/** A, B o C con su cantidad de comprobantes y su monto total. */
+export interface CategoriaConciliacion {
+  categoria: 'A' | 'B' | 'C';
+  clave: keyof DetalleConciliacion;
+  nombre: string;
+  descripcion: string;
+  cantidad: number;
+  importe: number;
+}
+
+/** A: conciliados; B: faltan en ARCA (están en el Libro Mayor de Xubio); C: faltan en el Libro Mayor de Xubio (están en ARCA). */
 export interface DetalleConciliacion {
   conciliados: Retencion[];
-  falta_certificado: Retencion[];
-  no_declarados: Retencion[];
+  faltan_en_arca: Retencion[];
+  faltan_en_mayor: Retencion[];
 }
 
 export type EstadoTarea = 'pendiente' | 'procesando' | 'completado' | 'error';
@@ -93,6 +117,9 @@ export interface ConciliacionResultado {
   status: 'completado';
   resumen: ResumenConciliacion;
   detalle: DetalleConciliacion;
+  categorias?: CategoriaConciliacion[];
+  /** Controles de que ARCA y el mayor sean del mismo mes e impuesto. */
+  avisos?: string[];
   por_impuesto?: ImpuestoConciliado[];
   sugerencias?: Sugerencia[];
 }

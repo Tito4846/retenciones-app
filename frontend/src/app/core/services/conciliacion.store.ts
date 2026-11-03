@@ -46,6 +46,8 @@ export class ConciliacionStore {
   readonly detalle = signal<DetalleConciliacion | null>(null);
   readonly porImpuesto = signal<ImpuestoConciliado[]>([]);
   readonly sugerencias = signal<Sugerencia[]>([]);
+  /** Si los dos archivos no son del mismo mes, impuesto o empresa: qué volver a bajar. */
+  readonly avisos = signal<string[]>([]);
 
   /** Un par a mano en curso (id de la retención de ARCA) y su error. */
   readonly emparejando = signal<string | null>(null);
@@ -146,6 +148,7 @@ export class ConciliacionStore {
     this.detalle.set(resultado.detalle);
     this.porImpuesto.set(resultado.por_impuesto ?? []);
     this.sugerencias.set(resultado.sugerencias ?? []);
+    this.avisos.set(resultado.avisos ?? []);
   }
 
   /** Descarta archivos y resultados para empezar una nueva conciliación. */
@@ -191,6 +194,7 @@ export class ConciliacionStore {
     this.detalle.set(null);
     this.porImpuesto.set([]);
     this.sugerencias.set([]);
+    this.avisos.set([]);
     this.errorPar.set(null);
   }
 }

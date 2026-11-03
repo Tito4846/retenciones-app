@@ -34,18 +34,26 @@ export class Importar {
   protected readonly conexiones = inject(ConexionesStore);
   private readonly router = inject(Router);
 
+  /** Cómo se arma una conciliación: un mes, una empresa y un impuesto, de los dos lados. */
+  protected readonly pasos = [
+    { titulo: 'Período y empresa', ayuda: 'Las fechas a analizar y la CUIT del cliente.' },
+    { titulo: 'Excel de ARCA', ayuda: 'Mis Retenciones filtrado por esa CUIT, el impuesto y las fechas.' },
+    { titulo: 'Excel de Xubio', ayuda: 'El Libro Mayor de la cuenta de retenciones de ese impuesto, mismas fechas.' },
+    { titulo: 'Cruce', ayuda: 'Comprobante contra comprobante: faltantes de cada lado.' },
+  ];
+
   protected readonly zonas = computed<ZonaCarga[]>(() => [
     {
       tipo: 'arca',
-      titulo: 'Retenciones ARCA',
-      ayuda: 'Mis Retenciones · CSV, XLSX o TXT',
+      titulo: 'Excel de ARCA · Mis Retenciones',
+      ayuda: 'Filtrado por la CUIT, el impuesto y las fechas · CSV, XLSX o TXT',
       accept: '.csv,.xlsx,.xls,.txt',
       archivo: this.store.archivoArca(),
     },
     {
       tipo: 'mayor',
-      titulo: 'Libro Mayor Xubio',
-      ayuda: 'Exportación del mayor · CSV o XLSX',
+      titulo: 'Excel de Xubio · Libro Mayor',
+      ayuda: 'La cuenta de retenciones de ese impuesto, mismas fechas · CSV o XLSX',
       accept: '.csv,.xlsx,.xls',
       archivo: this.store.archivoMayor(),
     },

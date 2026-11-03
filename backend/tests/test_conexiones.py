@@ -107,6 +107,9 @@ def _chrome_falso(oyentes: list):
     contexto.pages = [pestana]
     # "Mis Retenciones" esta entre los mas utilizados y se abre en otra pestana.
     pestana.context.expect_page.return_value.__enter__.return_value.value = pestana
+    # La version nueva muestra el "click aqui" a la version anterior.
+    pestana.frames = [pestana]
+    pestana.get_by_role.return_value.filter.return_value.first.count.return_value = 1
 
     @contextmanager
     def lanzar():
@@ -137,6 +140,34 @@ def test_bot_arca_conecta_y_atrapa_la_exportacion(tmp_path):
     assert bot.estado()["estado"] == DESCONECTADO
     # La descarga queda para conciliar aunque se cierre la ventana.
     assert bot.ultima_descarga() is not None
+
+
+def test_bot_arca_detecta_el_formulario_si_se_entra_a_mano(tmp_path, monkeypatch):
+    from app.bots.navegador_arca import MENSAJE_CONECTADO, MENSAJE_SIN_FORMULARIO
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "TIMEOUT_NAVEGACION_MS", 0)
+    lanzar, pestana = _chrome_falso([])
+    # Sin "click aqui" y la direccion directa contesta 401 (pasa en ARCA real).
+    pestana.frames = []
+    directa = pestana.context.new_page.return_value
+    directa.goto.return_value.ok = False
+    directa.goto.return_value.status = 401
+    opciones = pestana.locator.return_value.locator.return_value.evaluate_all
+    opciones.return_value = []
+    bot = NavegadorArca(lanzar=lanzar, directorio=tmp_path)
+    bot.conectar("30712345678", "x")
+    assert _esperar(lambda: bot.estado()["mensaje"] == MENSAJE_SIN_FORMULARIO)
+    assert bot.formulario() is None
+    directa.close.assert_called()
+
+    # La persona toca "click aqui" en la ventana y llega al formulario.
+    opciones.return_value = [{"valor": "30712345678", "texto": "30712345678"}]
+    pestana.url = "https://seti.afip.gob.ar/misret/consultaMisRetenciones.do?method=getForm"
+    pestana.locator.return_value.count.return_value = 1
+    assert _esperar(lambda: bot.estado()["mensaje"] == MENSAJE_CONECTADO)
+    assert bot.formulario()["cuits"] == ["30712345678"]
+    bot.desconectar()
 
 
 def test_bot_arca_cuit_invalida():
@@ -189,7 +220,15 @@ def test_conciliar_desde_conexiones(tmp_path, monkeypatch):
     assert pedidos[0][0] < date(2026, 10, 4) and pedidos[0][1] > date(2026, 10, 20)
 
 
-def test_automatico_detecta_impuestos_y_concilia(tmp_path, monkeypatch):
+def _reporte_de(cuenta: str) -> str:
+    """El reporte de una sola cuenta, como lo carga Xubio al tocar Aceptar."""
+    inicio, resto = WEBREPORT.split("<data>")
+    filas, cierre = resto.split("</data>")
+    propias = ";".join(f for f in filas.split(";") if f"," + cuenta + "," in f)
+    return f"{inicio}<data>{propias}</data>{cierre}"
+
+
+def _automatico(tmp_path, monkeypatch, pantalla):
     from app.bots import misret
 
     ruta = tmp_path / "arca.csv"
@@ -205,29 +244,53 @@ def test_automatico_detecta_impuestos_y_concilia(tmp_path, monkeypatch):
         lambda: {"impuestos": [{"codigo": "217", "descripcion": "GANANCIAS"}, {"codigo": "767", "descripcion": "IVA"}]},
     )
     monkeypatch.setattr(type(conexiones.xubio), "conectado", property(lambda self: True))
-    pedidos_mayor, consultas = [], []
-    monkeypatch.setattr(conexiones.xubio, "libro_mayor", lambda d, h: pedidos_mayor.append((d, h)) or WEBREPORT)
+    orden = []
 
     def consultar_y_esperar(consulta: misret.ConsultaArca, avance):
-        consultas.append(consulta)
-        avance("Consultando el impuesto 767 en ARCA (1 de 2)…")
+        orden.append(("arca", consulta.impuestos))
         return MagicMock(ruta=ruta, filas=4)
 
+    def por_pantalla(desde, hasta, impuesto, tipo, avance):
+        orden.append(("xubio", desde, hasta, impuesto, tipo))
+        return pantalla(impuesto)
+
     monkeypatch.setattr(conexiones.arca, "consultar_y_esperar", consultar_y_esperar)
+    monkeypatch.setattr(conexiones.xubio, "libro_mayor_por_pantalla", por_pantalla)
+    monkeypatch.setattr(conexiones.xubio, "libro_mayor", lambda d, h: orden.append(("reporte", d, h)) or WEBREPORT)
 
     respuesta = cliente.post(
         "/api/conexiones/automatico",
         json={"cuit_retenido": "30710809883", "desde": "2026-10-01", "hasta": "2026-10-31"},
     )
     assert respuesta.status_code == 202, respuesta.text
-    estado = cliente.get(f"/api/estado/{respuesta.json()['task_id']}").json()
+    return cliente.get(f"/api/estado/{respuesta.json()['task_id']}").json(), orden
+
+
+def test_automatico_arca_primero_y_libro_mayor_por_pantalla(tmp_path, monkeypatch):
+    cuentas = {"Ganancias": "Retenciones Ganancias Sufridas", "IVA": "Retenciones IVA Sufridas"}
+    estado, orden = _automatico(tmp_path, monkeypatch, lambda imp: [(cuentas[imp], _reporte_de(cuentas[imp]))])
 
     assert estado["status"] == "completado", estado
     assert estado["resumen"]["total_conciliados"] == 2
-    # El mayor se pide con el periodo mas la tolerancia, y los impuestos salen
-    # de sus cuentas de retenciones (IVA y Ganancias).
-    assert pedidos_mayor == [(date(2026, 10, 1), date(2026, 11, 5))]
-    assert sorted(consultas[0].impuestos) == ["217", "767"]
+    # Primero ARCA (sin impuesto elegido: Ganancias e IVA); despues Xubio con
+    # las mismas fechas, estiradas en la tolerancia, cuenta por impuesto.
+    assert orden == [
+        ("arca", ["217", "767"]),
+        ("xubio", date(2026, 10, 1), date(2026, 11, 5), "Ganancias", "RetencionPercepcion"),
+        ("xubio", date(2026, 10, 1), date(2026, 11, 5), "IVA", "RetencionPercepcion"),
+    ]
+
+
+def test_automatico_si_la_pantalla_falla_usa_el_reporte(tmp_path, monkeypatch):
+    from app.bots.libro_mayor_xubio import ErrorPantallaXubio
+
+    def falla(impuesto):
+        raise ErrorPantallaXubio("No apareció «Elige los filtros».")
+
+    estado, orden = _automatico(tmp_path, monkeypatch, falla)
+    assert estado["status"] == "completado", estado
+    assert estado["resumen"]["total_conciliados"] == 2
+    assert orden[-1] == ("reporte", date(2026, 10, 1), date(2026, 11, 5))
 
 
 def test_automatico_sin_conexiones():

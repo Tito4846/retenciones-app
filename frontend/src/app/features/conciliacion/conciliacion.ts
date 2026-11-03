@@ -15,6 +15,8 @@ type CampoOrden = 'fecha' | 'razon_social' | 'importe' | 'impuesto';
 
 interface PestanaConfig {
   id: Pestana;
+  /** A, B o C (la categoría de la conciliación); "Para revisar" no tiene. */
+  letra?: 'A' | 'B' | 'C';
   titulo: string;
   /** Qué significa para el contador y qué hay que hacer. */
   significado: string;
@@ -24,14 +26,42 @@ interface PestanaConfig {
 }
 
 const ETIQUETAS_CRITERIO: Record<CriterioConciliacion, string> = {
-  certificado: 'Nro. de certificado',
-  cuit: 'CUIT + importe',
+  comprobante: 'Nro. de comprobante',
+  cuit_importe: 'CUIT + importe',
   razon_social: 'Razón social + importe',
   importe_fecha: 'Importe + fecha',
+  diferencia_menor: 'Mismo agente, centavos de diferencia',
   manual: 'A mano',
 };
 
 const PESTANAS: readonly PestanaConfig[] = [
+  {
+    id: 'conciliados',
+    letra: 'A',
+    titulo: 'Conciliados',
+    significado: 'Coinciden en ARCA y en el Libro Mayor de Xubio',
+    accion: 'Sin acciones pendientes',
+    vacio: 'Todavía no hay retenciones conciliadas.',
+    tono: 'verde',
+  },
+  {
+    id: 'faltan_en_arca',
+    letra: 'B',
+    titulo: 'Faltan en ARCA',
+    significado: 'Registradas en el Libro Mayor de Xubio, pero no figuran en ARCA',
+    accion: 'Reclamar el certificado al agente o revisar el asiento',
+    vacio: 'Todo lo registrado en el Libro Mayor de Xubio figura en ARCA.',
+    tono: 'ambar',
+  },
+  {
+    id: 'faltan_en_mayor',
+    letra: 'C',
+    titulo: 'Faltan en el Mayor',
+    significado: 'Declaradas en ARCA, sin registrar en el Libro Mayor de Xubio',
+    accion: 'Registrar el asiento en Xubio (ajuste contable)',
+    vacio: 'Todas las retenciones de ARCA están registradas en el Libro Mayor de Xubio.',
+    tono: 'rojo',
+  },
   {
     id: 'revisar',
     titulo: 'Para revisar',
@@ -40,31 +70,10 @@ const PESTANAS: readonly PestanaConfig[] = [
     vacio: 'No hay pares dudosos para revisar.',
     tono: 'marca',
   },
-  {
-    id: 'no_declarados',
-    titulo: 'No declarados',
-    significado: 'ARCA las informa, pero no están en el mayor',
-    accion: 'Registrar el asiento en Xubio',
-    vacio: 'Todas las retenciones de ARCA están registradas en el mayor.',
-    tono: 'rojo',
-  },
-  {
-    id: 'falta_certificado',
-    titulo: 'Falta certificado',
-    significado: 'Registradas en el mayor, sin respaldo en ARCA',
-    accion: 'Pedir el certificado al agente o revisar el asiento',
-    vacio: 'No hay asientos del mayor sin certificado en ARCA.',
-    tono: 'ambar',
-  },
-  {
-    id: 'conciliados',
-    titulo: 'Conciliados',
-    significado: 'Coinciden ARCA y el mayor',
-    accion: 'Sin acciones pendientes',
-    vacio: 'Todavía no hay retenciones conciliadas.',
-    tono: 'verde',
-  },
 ];
+
+/** Casos de B y C que se muestran de entrada (el detalle completo está en cada pestaña y en el Excel). */
+const CASOS_EN_RESUMEN = 10;
 
 function normalizar(texto: string | null | undefined): string {
   return (texto ?? '')
@@ -83,6 +92,18 @@ export class Conciliacion {
   private readonly router = inject(Router);
 
   protected readonly pestanas = PESTANAS;
+  protected readonly casosEnResumen = CASOS_EN_RESUMEN;
+
+  /** Los primeros casos de B y C: lo que hay que reclamar y lo que hay que ajustar. */
+  protected readonly primerosCasos = computed(() => {
+    const d = this.store.detalle();
+    if (!d) return [];
+    return (['faltan_en_arca', 'faltan_en_mayor'] as const).map((id) => ({
+      config: PESTANAS.find((p) => p.id === id)!,
+      filas: d[id].slice(0, CASOS_EN_RESUMEN),
+      total: d[id].length,
+    }));
+  });
 
   /** Sugerencias que la persona descartó en esta pantalla (no se mandan al servidor). */
   private readonly descartadas = signal<Set<string>>(new Set());
@@ -97,8 +118,8 @@ export class Conciliacion {
     computation: () => {
       if (this.store.sugerencias().length) return 'revisar';
       const r = this.store.resumen();
-      if (r?.total_no_declarados) return 'no_declarados';
-      if (r?.total_falta_certificado) return 'falta_certificado';
+      if (r?.total_faltan_en_mayor) return 'faltan_en_mayor';
+      if (r?.total_faltan_en_arca) return 'faltan_en_arca';
       return 'conciliados';
     },
   });
@@ -114,7 +135,7 @@ export class Conciliacion {
   protected readonly impuestos = computed(() => {
     const d = this.store.detalle();
     if (!d) return [];
-    const todos = [...d.conciliados, ...d.no_declarados, ...d.falta_certificado].map((f) => f.impuesto || 'Sin identificar');
+    const todos = [...d.conciliados, ...d.faltan_en_mayor, ...d.faltan_en_arca].map((f) => f.impuesto || 'Sin identificar');
     return [...new Set(todos)].sort();
   });
 
@@ -162,7 +183,7 @@ export class Conciliacion {
     if (!r || !d) return [];
     const texto = normalizar(this.busquedaPar().trim());
     const fechaR = r.fecha ? Date.parse(r.fecha) : null;
-    return d.falta_certificado
+    return d.faltan_en_arca
       .filter(
         (m) =>
           !texto ||

@@ -80,6 +80,9 @@ class Settings(BaseSettings):
     # Palabras (separadas por coma) que identifican las cuentas de retenciones
     # sufridas en el plan de cuentas.
     XUBIO_CUENTAS_RETENCIONES: str = "retencion,retenciones,percepcion,percepciones"
+    # Direccion de la pantalla de Libro Mayor (la de la barra del navegador).
+    # Vacia = el bot la busca en el menu de Xubio.
+    XUBIO_URL_LIBRO_MAYOR: str = ""
 
 
 settings = Settings()
