@@ -20,6 +20,15 @@ class ErrorDeLectura(RuntimeError):
     """Un archivo que no se puede usar, con un motivo que el usuario entiende."""
 
 
+class OperacionCancelada(Exception):
+    """La persona toco «Cancelar»: el bot corta en el proximo paso."""
+
+
+# Para los que no se pueden cancelar (los tests, la consulta sin pantalla).
+def nunca_cancelada() -> bool:
+    return False
+
+
 def limpiar_numero(s, es_formato_ingles: bool = False) -> float:
     """
     Convierte un importe escrito como texto a float.

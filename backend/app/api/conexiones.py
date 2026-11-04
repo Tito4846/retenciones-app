@@ -104,6 +104,13 @@ def consultar_arca(consulta: ConsultaMisRetenciones) -> dict:
     return conexiones.estado()
 
 
+@router.post("/arca/cancelar")
+def cancelar_consulta_arca() -> dict:
+    """Corta «Solo consultar ARCA»: el bot termina el impuesto en curso y no sigue."""
+    conexiones.arca.cancelar()
+    return conexiones.estado()
+
+
 @router.post("/arca/captura")
 def capturar_arca() -> dict:
     """Guarda el HTML de la ventana de ARCA en datos/debug (para ajustar el bot)."""
@@ -174,6 +181,7 @@ def automatico(background: BackgroundTasks, consulta: ConsultaMisRetenciones) ->
         lambda: conexiones.traer_automatico(
             **consulta.model_dump(),
             avance=lambda paso, detalle: tareas.avanzar(task_id, paso, detalle),
+            cancelada=lambda: tareas.cancelada(task_id),
         ),
         hasta_periodo=consulta.hasta,
     )

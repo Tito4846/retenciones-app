@@ -95,6 +95,21 @@ export class ConciliacionStore {
     this.ejecucion = estados.subscribe((estado) => this.aplicarEstado(estado));
   }
 
+  /**
+   * «Cancelar»: deja de seguir la tarea y le avisa al backend, que frena el bot
+   * antes del paso siguiente. La pantalla queda lista para corregir y reintentar.
+   */
+  cancelar(): void {
+    if (!this.ocupado()) return;
+    const taskId = this.taskId();
+    this.ejecucion?.unsubscribe();
+    // Si el aviso no llega (la tarea ya terminó o venció), igual se descarta.
+    if (taskId) this.conciliacionService.cancelar(taskId).subscribe({ error: () => undefined });
+    this.fase.set('cancelado');
+    this.paso.set(null);
+    this.detallePaso.set(null);
+  }
+
   exportar(): void {
     const taskId = this.taskId();
     if (!taskId || this.exportando()) return;

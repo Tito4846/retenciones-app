@@ -199,7 +199,13 @@ export class ConsultaArca {
 
   // --- Avance del flujo automático
   protected readonly pasos = PASOS;
-  protected readonly enCurso = computed(() => this.store.origen() === 'automatico' && this.store.fase() !== 'inicial');
+  protected readonly enCurso = computed(
+    () => this.store.origen() === 'automatico' && !['inicial', 'cancelado'].includes(this.store.fase()),
+  );
+  /** Se tocó «Cancelar» en «Traer y conciliar»: el formulario vuelve para corregir y reintentar. */
+  protected readonly cancelado = computed(() => this.store.origen() === 'automatico' && this.store.fase() === 'cancelado');
+  /** La sesión de ARCA venció y el bot está entrando de nuevo con los mismos datos. */
+  protected readonly renovandoArca = computed(() => !!this.conexiones.arca()?.renovando);
   protected readonly ocupado = computed(() => this.store.ocupado() || this.consultandoArca() || this.conexiones.enviando());
   protected readonly puedeTraerTodo = computed(
     () => this.arcaConectado() && !!this.formulario() && this.xubioConectado() && !this.ocupado(),

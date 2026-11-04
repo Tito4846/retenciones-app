@@ -363,7 +363,9 @@ class NavegadorXubio:
                     minimizada = minimizar_ventana(contexto, pestana)
             elif time.monotonic() - ultimo_uso > MANTENER_VIVA_S:
                 ultimo_uso = time.monotonic()
-                _mantener_viva(contexto, pestana)
+                if not _mantener_viva(contexto, pestana):
+                    # A la pantalla de ingreso: la vuelta siguiente entra sola con la misma cuenta.
+                    _volver_al_ingreso(pestana)
 
             try:
                 item = self._cola.get(timeout=_VIGILANCIA_S)
@@ -419,14 +421,19 @@ def _completar_ingreso(pestana: Any, cuenta: tuple[str, str], escrito: set[str])
     return None
 
 
-def _mantener_viva(contexto: Any, pestana: Any) -> None:
-    """Pide la pagina con las cookies de la ventana (sin tocar la pestana)."""
+def _mantener_viva(contexto: Any, pestana: Any) -> bool:
+    """
+    Pide la pagina con las cookies de la ventana (sin tocar la pestana). False
+    si Xubio la mando al ingreso: la sesion ya vencio aunque la pantalla no cambio.
+    """
     try:
-        contexto.request.get(pestana.url, timeout=30000)
+        respuesta = contexto.request.get(pestana.url, timeout=30000)
+        return not en_ingreso(respuesta.url or "")
     except Exception as error:  # noqa: BLE001
         if es_cierre(error):
             raise
         logger.info("No se pudo mantener viva la sesion de Xubio: %s", error)
+        return True
 
 
 def _volver_al_ingreso(pestana: Any) -> None:

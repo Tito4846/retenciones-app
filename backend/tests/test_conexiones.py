@@ -228,7 +228,7 @@ def _reporte_de(cuenta: str) -> str:
     return f"{inicio}<data>{propias}</data>{cierre}"
 
 
-def _automatico(tmp_path, monkeypatch, pantalla):
+def _automatico(tmp_path, monkeypatch, pantalla, al_consultar_arca=lambda: None):
     from app.bots import misret
 
     ruta = tmp_path / "arca.csv"
@@ -246,8 +246,9 @@ def _automatico(tmp_path, monkeypatch, pantalla):
     monkeypatch.setattr(type(conexiones.xubio), "conectado", property(lambda self: True))
     orden = []
 
-    def consultar_y_esperar(consulta: misret.ConsultaArca, avance):
+    def consultar_y_esperar(consulta: misret.ConsultaArca, avance, cancelada):
         orden.append(("arca", consulta.impuestos))
+        al_consultar_arca()
         return MagicMock(ruta=ruta, filas=4)
 
     def por_pantalla(desde, hasta, impuesto, tipo, avance):
@@ -279,6 +280,66 @@ def test_automatico_arca_primero_y_libro_mayor_por_pantalla(tmp_path, monkeypatc
         ("xubio", date(2026, 10, 1), date(2026, 11, 5), "Ganancias", "RetencionPercepcion"),
         ("xubio", date(2026, 10, 1), date(2026, 11, 5), "IVA", "RetencionPercepcion"),
     ]
+
+
+def test_automatico_cancelado_no_sigue_con_xubio(tmp_path, monkeypatch):
+    from app.services import tareas
+
+    def tocar_cancelar():
+        # La persona toca «Cancelar» mientras ARCA responde.
+        for task_id, tarea in list(tareas._tareas.items()):
+            if tarea.status == "procesando":
+                assert cliente.post(f"/api/cancelar/{task_id}").status_code == 200
+
+    estado, orden = _automatico(tmp_path, monkeypatch, lambda imp: [], tocar_cancelar)
+    assert estado == {"status": "cancelado", "mensaje": "Operación cancelada."}
+    assert [o[0] for o in orden] == ["arca"]
+
+
+def test_cancelar_una_conciliacion_terminada_o_inexistente(ruta_arca, ruta_mayor):
+    assert cliente.post("/api/cancelar/no-existe").status_code == 404
+    with open(ruta_arca, "rb") as a, open(ruta_mayor, "rb") as m:
+        task_id = cliente.post(
+            "/api/conciliar", files={"archivo_arca": ("arca.csv", a), "archivo_mayor": ("mayor.xlsx", m)}
+        ).json()["task_id"]
+    assert cliente.post(f"/api/cancelar/{task_id}").status_code == 409
+    assert cliente.get(f"/api/estado/{task_id}").json()["status"] == "completado"
+
+
+def test_bot_arca_consulta_cancelada_frena_antes_del_impuesto(tmp_path):
+    from app.bots import misret
+    from app.services.tools import OperacionCancelada
+
+    bot = NavegadorArca(lanzar=MagicMock(), directorio=tmp_path)
+    consulta = misret.ConsultaArca(cuit_retenido="30712345678", impuestos=["217"], desde=date(2026, 10, 1),
+                                   hasta=date(2026, 10, 31))
+    with pytest.raises(OperacionCancelada):
+        bot._consultar_en_ventana(MagicMock(), MagicMock(), consulta, None, lambda: True)
+
+
+def test_bot_arca_renueva_la_sesion_sola_con_los_mismos_datos(tmp_path, monkeypatch):
+    from app.bots import navegador_arca
+
+    monkeypatch.setattr(navegador_arca, "MANTENER_VIVA_S", 0.2)
+    lanzar, pestana = _chrome_falso([])
+    with lanzar() as (contexto, _):
+        pass
+    # La primera revision vuelve con el login de ARCA (sesion vencida); despues, viva.
+    vencida, viva = MagicMock(), MagicMock()
+    vencida.text.return_value = '<input id="F1:username">'
+    viva.text.return_value = "<html>Mis Retenciones</html>"
+    contexto.request.get.side_effect = [vencida] + [viva] * 1000
+
+    bot = NavegadorArca(lanzar=lanzar, directorio=tmp_path)
+    bot.conectar("30712345678", "clave-de-prueba")
+    assert _esperar(lambda: "renovada" in (bot.estado()["mensaje"] or ""))
+    assert bot.estado()["estado"] == CONECTADO
+    # Entro dos veces con la misma CUIT y clave, sin pedirlas de nuevo.
+    claves = [c.args[1] for c in pestana.fill.call_args_list if c.args[1] == "clave-de-prueba"]
+    assert len(claves) == 2
+    contexto.clear_cookies.assert_called_once()
+    assert "clave-de-prueba" not in str(bot.estado())
+    bot.desconectar()
 
 
 def test_automatico_si_la_pantalla_falla_usa_el_reporte(tmp_path, monkeypatch):

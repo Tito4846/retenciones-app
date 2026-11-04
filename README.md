@@ -55,6 +55,7 @@ Variables principales:
 | `EMPRESA` | vacío | Nombre que aparece en el membrete del Excel |
 | `HEADLESS` | `false` | Chrome visible (necesario para el doble factor de ARCA y el captcha de Xubio) |
 | `ARCA_SERVICIO` | `Mis Retenciones` | Nombre del servicio en el buscador del portal de ARCA |
+| `ARCA_RENOVAR_SESION_MIN` | `50` | La sesión de ARCA se renueva sola con la misma CUIT y clave (solo en memoria mientras la ventana está abierta) cuando vence y, antes, a estos minutos sin uso. `0` = solo cuando vence. Con doble factor solo se renueva al vencer |
 | `XUBIO_USUARIO` / `XUBIO_CLAVE` | vacío | Si se completan, el bot escribe el ingreso a Xubio solo |
 | `XUBIO_CUENTAS_RETENCIONES` | `retencion,retenciones,percepcion,percepciones` | Palabras que identifican las cuentas de retenciones |
 | `CORS_ORIGINS` | `[]` | Orígenes extra permitidos (cualquier `localhost` ya está permitido) |
@@ -122,8 +123,16 @@ El cruce en sí:
    - **C · Faltan en el Mayor**: ARCA las informa y no están registradas (ajuste contable).
 
 El resultado muestra cantidad y monto de cada categoría y los primeros 10 casos de B y C.
-El Excel trae las pestañas `Resumen`, `Conciliados`, `Faltan_en_ARCA` y `Faltan_en_Mayor`
-(más `Para revisar` si hay pares dudosos).
+El Excel trae dos pestañas con las planillas originales, lo conciliado pintado de amarillo:
+`ARCA` (el export de Mis Retenciones, con el total al pie) y `LIBRO MAYOR` (el mayor de Xubio
+con el saldo corrido). Debajo del mayor van dos apartados con su título: **Partidas de ARCA
+pendientes de registración** (lo que falta en el mayor, importe en el Debe) y **Partidas
+contabilizadas - revisar procedencia / revisar cliente** (lo que falta en ARCA, el mismo asiento
+con el importe en el Haber). Al pie, el control: **saldo ARCA** (el total de la hoja ARCA),
+**saldo Xubio** (el saldo corrido después de los dos apartados) y **dif**, que debería dar 0.
+Si no da 0, la dif queda en rojo y debajo van, también en rojo, los motivos con lo que suma cada
+uno (redondeos en conciliadas, saldo inicial o apertura, aplicaciones del Haber). En la pantalla, el cuadro «Diferencia ARCA − Mayor» hace lo mismo: lista
+los motivos y marca en rojo las filas responsables en el detalle.
 
 ## Tests
 

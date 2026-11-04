@@ -1,4 +1,3 @@
-import pandas as pd
 import pytest
 from openpyxl import Workbook
 
@@ -44,13 +43,3 @@ def ruta_mayor(tmp_path):
     ruta = tmp_path / "mayor.xlsx"
     libro.save(ruta)
     return str(ruta)
-
-
-@pytest.fixture
-def leer_hoja():
-    def _leer(contenido: bytes, hoja: str) -> pd.DataFrame:
-        import io
-
-        return pd.read_excel(io.BytesIO(contenido), sheet_name=hoja, header=7)
-
-    return _leer

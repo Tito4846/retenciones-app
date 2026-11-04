@@ -55,6 +55,12 @@ class Settings(BaseSettings):
     # no se puede, yendo directo a esta direccion con la sesion abierta.
     ARCA_VERSION_ANTERIOR: bool = True
     ARCA_URL_MISRET: str = "https://seti.afip.gob.ar/misret/consultaMisRetenciones.do?method=getForm"
+    # La sesion de ARCA se renueva sola con la CUIT y la clave del ingreso (que
+    # quedan solo en memoria mientras la ventana esta abierta): cuando ARCA la
+    # vence y, antes, al cumplir estos minutos sin uso. 0 = solo cuando vence.
+    # Si el ingreso pidio doble factor no se renueva antes: lo tendria que
+    # completar la persona cada vez.
+    ARCA_RENOVAR_SESION_MIN: int = 50
     TIMEOUT_LOGIN_MS: int = 30000
     TIMEOUT_NAVEGACION_MS: int = 15000
     # Si el servicio no aparece en este tiempo, la cuenta no esta adherida.

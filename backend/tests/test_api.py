@@ -17,7 +17,7 @@ def _subir(ruta_arca, ruta_mayor):
         )
 
 
-def test_flujo_completo_con_exportacion(ruta_arca, ruta_mayor, leer_hoja):
+def test_flujo_completo_con_exportacion(ruta_arca, ruta_mayor):
     respuesta = _subir(ruta_arca, ruta_mayor)
     assert respuesta.status_code == 202
     task_id = respuesta.json()["task_id"]
@@ -32,13 +32,58 @@ def test_flujo_completo_con_exportacion(ruta_arca, ruta_mayor, leer_hoja):
     assert excel.status_code == 200
     assert "Piccinini" in unquote(excel.headers["content-disposition"])
 
-    conciliados = leer_hoja(excel.content, "Conciliados")
-    assert list(conciliados["Importe"].dropna())[:2] == [32110.0, 16100.0]
-    faltan_en_mayor = leer_hoja(excel.content, "Faltan_en_Mayor")
-    assert set(faltan_en_mayor["Estado"].dropna()) == {"Sin coincidencia"}
-    assert openpyxl.load_workbook(io.BytesIO(excel.content)).sheetnames[:4] == [
-        "Resumen", "Conciliados", "Faltan_en_ARCA", "Faltan_en_Mayor"]
+    libro = openpyxl.load_workbook(io.BytesIO(excel.content))
+    assert libro.sheetnames == ["ARCA", "LIBRO MAYOR"]
+
+    # ARCA: el export tal cual, lo conciliado en amarillo y el total dos filas abajo.
+    arca = libro["ARCA"]
+    assert arca["A1"].value == "CUIT Agente Ret./Perc." and arca["H1"].value == "Importe Ret./Perc."
+    assert [arca.cell(row=f, column=8).value for f in range(2, 6)] == [32110.0, 16100.0, 8300.75, 1500.0]
+    assert _amarillos(arca, "H") == [32110.0, 16100.0]
+    assert arca["H8"].value == "=SUM(H2:H5)"
+
+    # LIBRO MAYOR: el mayor tal cual (con el saldo inicial y la aplicacion del Haber) y,
+    # debajo, cada apartado con su titulo: lo que falta en el mayor (Debe) y lo que
+    # falta en ARCA (Haber). Al pie, saldo ARCA, saldo Xubio y la diferencia.
+    mayor = libro["LIBRO MAYOR"]
+    assert [c.value for c in mayor[1]] == ["Fecha", "Documento", "Cuenta", "Debe", "Haber", "Descripción", "Organización"]
+    assert [mayor.cell(row=f, column=6).value for f in range(2, 7)] == [
+        "Saldo Inicial", "Cobro Cert. 12345", "Cobro factura 33", "Cobro", "Aplicación DDJJ IVA"]
+    assert _amarillos(mayor, "D") == [32110.0, 16100.0]
+    assert mayor["E6"].value == 40000.0
+    assert mayor["A9"].value == "PARTIDAS DE ARCA PENDIENTES DE REGISTRACIÓN" and mayor["A9"].font.bold
+    assert [(mayor.cell(row=f, column=1).value, mayor.cell(row=f, column=2).value, mayor.cell(row=f, column=4).value)
+            for f in (10, 11)] == [("RETENCION", "PROVEEDOR SRL", 8300.75), ("RETENCION", "PROVEEDOR SRL", 1500.0)]
+    assert mayor["A14"].value == "PARTIDAS CONTABILIZADAS - REVISAR PROCEDENCIA / REVISAR CLIENTE"
+    assert (mayor["B15"].value, mayor["D15"].value, mayor["E15"].value) == ("REC 0001-00004530", None, 1500.0)
+    # Sin columna Saldo en este mayor: el saldo Xubio es Debe menos Haber de todo lo de arriba.
+    assert [(mayor.cell(row=f, column=4).value, mayor.cell(row=f, column=5).value) for f in (18, 19, 20)] == [
+        ("SALDO ARCA:", "='ARCA'!H8"),
+        ("SALDO XUBIO:", "=SUM(D2:D17)-SUM(E2:E17)"),
+        ("DIF:", "=E18-E19"),
+    ]
+    # El control no da 0 por la aplicacion a la DDJJ (Haber), que ARCA no informa:
+    # la DIF y el motivo al pie van en rojo; las filas del mayor y de ARCA, no.
+    assert _rojo(mayor["E20"])
+    assert mayor["A22"].value.startswith("MOTIVOS DE LA DIFERENCIA") and _rojo(mayor["A22"])
+    assert mayor["A23"].value.startswith("Aplicaciones del Haber") and mayor["E23"].value == 40000.0
+    assert not _rojo(mayor["E6"]) and not any(_rojo(c) for c in arca["H"])
+    assert mayor.max_row == 23
+
+    # El cuadro de la pantalla: ARCA − Mayor = lo pendiente de registrar menos lo que ARCA no informa.
+    motivos = estado["resumen"]["motivos_diferencia"]
+    assert [(m["motivo"], m["cantidad"], m["importe"]) for m in motivos] == [
+        ("faltan_en_mayor", 2, 9800.75), ("faltan_en_arca", 1, -1500.0)]
+    assert sum(m["importe"] for m in motivos) == estado["resumen"]["diferencia"]
     assert [c["categoria"] for c in estado["categorias"]] == ["A", "B", "C"]
+
+
+def _amarillos(hoja, columna: str) -> list:
+    return [c.value for c in hoja[columna] if c.fill.fill_type == "solid"]
+
+
+def _rojo(celda) -> bool:
+    return celda.font.color is not None and celda.font.color.rgb == "FFC00000"
 
 
 def test_archivo_ilegible_termina_en_error(tmp_path, ruta_mayor):
@@ -62,7 +107,7 @@ def test_estado_inexistente():
     assert cliente.get("/api/estado/no-existe").status_code == 404
 
 
-def test_emparejar_a_mano_y_deshacer(ruta_arca, ruta_mayor, leer_hoja):
+def test_emparejar_a_mano_y_deshacer(ruta_arca, ruta_mayor):
     task_id = _subir(ruta_arca, ruta_mayor).json()["task_id"]
     estado = cliente.get(f"/api/estado/{task_id}").json()
 
@@ -79,8 +124,8 @@ def test_emparejar_a_mano_y_deshacer(ruta_arca, ruta_mayor, leer_hoja):
     assert nuevo["sugerencias"] == []
     # El estado y el Excel ya tienen el par.
     assert cliente.get(f"/api/estado/{task_id}").json()["resumen"]["total_conciliados"] == 3
-    conciliados = leer_hoja(cliente.get(f"/api/exportar/{task_id}").content, "Conciliados")
-    assert "Conciliado a mano" in set(conciliados["Criterio"].dropna())
+    libro = openpyxl.load_workbook(io.BytesIO(cliente.get(f"/api/exportar/{task_id}").content))
+    assert sorted(_amarillos(libro["ARCA"], "H")) == [1500.0, 16100.0, 32110.0]
 
     # Un lado ya conciliado no se puede volver a usar.
     assert cliente.post(f"/api/conciliacion/{task_id}/pares", json=par).status_code == 409

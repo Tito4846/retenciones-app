@@ -4,6 +4,7 @@ import { Router } from '@angular/router';
 import {
   CriterioConciliacion,
   DetalleConciliacion,
+  MotivoDiferencia,
   Retencion,
   Sugerencia,
 } from '../../core/models/conciliacion.models';
@@ -75,6 +76,53 @@ const PESTANAS: readonly PestanaConfig[] = [
 /** Casos de B y C que se muestran de entrada (el detalle completo está en cada pestaña y en el Excel). */
 const CASOS_EN_RESUMEN = 10;
 
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+const PESOS = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' });
+
+/** "2026-10-16" → "16/10/2026". */
+function fechaCorta(iso: string | null): string {
+  if (!iso) return 's/f';
+  const [a, m, d] = iso.slice(0, 10).split('-');
+  return `${d}/${m}/${a}`;
+}
+
+/** "octubre de 2026" (o "septiembre y octubre de 2026") según las fechas de los movimientos. */
+function periodoDe(movs: Retencion[]): string {
+  const meses = [...new Set(movs.map((m) => m.fecha?.slice(0, 7)).filter((m): m is string => !!m))].sort();
+  if (!meses.length) return 'el período';
+  const nombres = meses.map((m) => `${MESES[Number(m.slice(5, 7)) - 1]} de ${m.slice(0, 4)}`);
+  return nombres.length === 1 ? nombres[0] : `${nombres.slice(0, -1).join(', ')} y ${nombres.at(-1)}`;
+}
+
+/** El mensaje para el cliente: lo registrado en el mayor que ARCA no informa. */
+function armarAviso(movs: Retencion[]): string {
+  const total = movs.reduce((s, m) => s + m.importe, 0);
+  const lineas = movs.map((m) => {
+    const tipo = m.tipo === 'Percepcion' ? 'percepción' : 'retención';
+    const impuesto = m.impuesto ? `${tipo} de ${m.impuesto}` : tipo;
+    const comprobante = m.documento ? ` · ${m.documento}` : '';
+    return `• ${fechaCorta(m.fecha)} · ${m.razon_social || 'Sin organización'} · ${impuesto}${comprobante} · ${PESOS.format(m.importe)}`;
+  });
+  return [
+    'Hola, ¿cómo estás?',
+    '',
+    `Al conciliar las retenciones y percepciones de ${periodoDe(movs)} encontramos ${
+      movs.length === 1 ? 'un movimiento registrado' : `${movs.length} movimientos registrados`
+    } en la contabilidad que no ${movs.length === 1 ? 'figura' : 'figuran'} en ARCA (Mis Retenciones):`,
+    '',
+    ...lineas,
+    '',
+    `Total: ${PESOS.format(total)}`,
+    '',
+    'Mientras el agente no lo informe en ARCA no se puede computar en la declaración jurada. Te pedimos que:',
+    '1. Nos confirmes si estos importes efectivamente te los retuvieron o percibieron (o si se trata de otro concepto).',
+    '2. Si corresponde, le pidas al agente el certificado o que rectifique su declaración.',
+    '',
+    'Cualquier duda, quedamos a disposición.',
+    'Saludos.',
+  ].join('\n');
+}
+
 function normalizar(texto: string | null | undefined): string {
   return (texto ?? '')
     .normalize('NFD')
@@ -127,6 +175,23 @@ export class Conciliacion {
     () => PESTANAS.find((p) => p.id === this.pestanaActiva()) ?? PESTANAS[0],
   );
 
+  /** Por qué la diferencia ARCA − Mayor no da 0 (vacío si da 0). */
+  protected readonly motivosDiferencia = computed(() => this.store.resumen()?.motivos_diferencia ?? []);
+  /** Las filas responsables de la diferencia: van en rojo en el detalle. */
+  private readonly responsables = computed(
+    () => new Set(this.motivosDiferencia().flatMap((m) => m.ids)),
+  );
+
+  protected esResponsable(item: Retencion): boolean {
+    return !!item.id && this.responsables().has(item.id);
+  }
+
+  /** Lleva al detalle donde están las filas de ese motivo. */
+  protected verMotivo(motivo: MotivoDiferencia): void {
+    this.elegirPestana(motivo.motivo === 'redondeos' ? 'conciliados' : motivo.motivo);
+    document.getElementById('detalle')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
   // --- Filtros y orden de la tabla
   protected readonly busqueda = signal('');
   protected readonly impuestoFiltro = signal<string>('');
@@ -165,6 +230,80 @@ export class Conciliacion {
 
   protected readonly totalFiltrado = computed(() => this.filas().reduce((s, f) => s + f.importe, 0));
   protected readonly hayFiltro = computed(() => !!this.busqueda().trim() || !!this.impuestoFiltro());
+
+  protected limpiarFiltros(): void {
+    this.busqueda.set('');
+    this.impuestoFiltro.set('');
+  }
+
+  // --- Avisar al cliente lo que falta en ARCA
+  /** Ids de "Faltan en ARCA" elegidos; se vacía con cada resultado nuevo o al emparejar. */
+  protected readonly seleccion = linkedSignal<unknown, Set<string>>({
+    source: () => this.store.detalle(),
+    computation: () => new Set(),
+  });
+  protected readonly seleccionadas = computed(() => {
+    const ids = this.seleccion();
+    return (this.store.detalle()?.faltan_en_arca ?? []).filter((m) => !!m.id && ids.has(m.id));
+  });
+  protected readonly totalSeleccionado = computed(() => this.seleccionadas().reduce((s, m) => s + m.importe, 0));
+  /** Estado del casillero del encabezado sobre las filas visibles (con filtros). */
+  protected readonly marcaTodas = computed<'todas' | 'algunas' | 'ninguna'>(() => {
+    const visibles = this.filas().filter((f) => !!f.id);
+    const elegidas = visibles.filter((f) => this.seleccion().has(f.id!)).length;
+    return !elegidas ? 'ninguna' : elegidas === visibles.length ? 'todas' : 'algunas';
+  });
+
+  protected elegida(item: Retencion): boolean {
+    return !!item.id && this.seleccion().has(item.id);
+  }
+
+  protected alternar(item: Retencion): void {
+    if (!item.id) return;
+    this.seleccion.update((s) => {
+      const nueva = new Set(s);
+      if (!nueva.delete(item.id!)) nueva.add(item.id!);
+      return nueva;
+    });
+  }
+
+  /** Marca o desmarca todas las filas visibles (las que dejan los filtros). */
+  protected alternarTodas(): void {
+    const ids = this.filas().flatMap((f) => (f.id ? [f.id] : []));
+    const marcar = this.marcaTodas() !== 'todas';
+    this.seleccion.update((s) => {
+      const nueva = new Set(s);
+      ids.forEach((id) => (marcar ? nueva.add(id) : nueva.delete(id)));
+      return nueva;
+    });
+  }
+
+  protected readonly aviso = signal<string | null>(null);
+  protected readonly copiado = signal(false);
+
+  protected abrirAviso(): void {
+    this.copiado.set(false);
+    this.aviso.set(armarAviso(this.seleccionadas()));
+  }
+
+  protected async copiarAviso(): Promise<void> {
+    const texto = this.aviso();
+    if (!texto) return;
+    try {
+      await navigator.clipboard.writeText(texto);
+      this.copiado.set(true);
+      setTimeout(() => this.copiado.set(false), 2000);
+    } catch {
+      this.copiado.set(false);
+    }
+  }
+
+  protected enviarPorCorreo(): void {
+    const texto = this.aviso();
+    if (!texto) return;
+    const asunto = 'Retenciones y percepciones que no figuran en ARCA';
+    window.location.href = `mailto:?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(texto)}`;
+  }
 
   /** Porcentaje de lo informado por ARCA que quedó conciliado (por importe). */
   protected readonly avance = computed(() => {

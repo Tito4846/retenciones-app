@@ -374,6 +374,7 @@ def conciliar_retenciones(
         len(faltan_en_mayor),
         len(sugerencias),
     )
+    resumen["motivos_diferencia"] = motivos_de_la_diferencia(conciliados, faltan_en_arca, faltan_en_mayor)
     return {
         "resumen": resumen,
         "avisos": controles(arca, mayor, tolerancia, hasta_periodo),
@@ -382,6 +383,35 @@ def conciliar_retenciones(
         "sugerencias": sugerencias,
         "detalle": detalle,
     }
+
+
+def motivos_de_la_diferencia(conciliados: list[dict], faltan_en_arca: list[dict], faltan_en_mayor: list[dict]) -> list[dict]:
+    """
+    Por que «ARCA − Mayor» no da 0, partida por partida: cada motivo dice cuanto
+    suma a la diferencia y que filas son las responsables (sus `ids`). Sumados
+    dan la diferencia. Vacio si da 0.
+    """
+    redondeos = [c for c in conciliados if dec(c["diferencia_importe"]) != 0]
+    candidatos = [
+        ("faltan_en_mayor", "Partidas de ARCA pendientes de registración: ARCA las informa y no están en el Libro Mayor",
+         faltan_en_mayor, lambda f: dec(f["importe"])),
+        ("faltan_en_arca", "Partidas contabilizadas que ARCA no informa: revisar procedencia / revisar cliente",
+         faltan_en_arca, lambda f: -dec(f["importe"])),
+        ("redondeos", "Conciliadas con importe distinto entre ARCA y el asiento (redondeos al cargar)",
+         redondeos, lambda c: dec(c["diferencia_importe"])),
+    ]
+    motivos = []
+    for codigo, texto, filas, aporte in candidatos:
+        importe = sum((aporte(f) for f in filas), Decimal("0"))
+        if filas and importe != 0:
+            motivos.append({
+                "motivo": codigo,
+                "descripcion": texto,
+                "cantidad": len(filas),
+                "importe": float(importe),
+                "ids": [f["id"] for f in filas],
+            })
+    return motivos
 
 
 def _rango(fechas: list[date]) -> str:

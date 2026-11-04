@@ -56,6 +56,11 @@ export class ConexionesStore {
     this.enviar(this.http.post<Conexiones>(`${this.api}/arca/consultar`, consulta));
   }
 
+  /** Corta «Solo consultar ARCA»: el bot termina el impuesto en curso y no sigue. */
+  cancelarConsultaArca(): void {
+    this.enviar(this.http.post<Conexiones>(`${this.api}/arca/cancelar`, {}));
+  }
+
   desconectarArca(): void {
     this.enviar(this.http.delete<Conexiones>(`${this.api}/arca`));
   }

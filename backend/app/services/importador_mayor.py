@@ -16,7 +16,7 @@ from typing import NamedTuple
 import pandas as pd
 
 from app.core.config import settings
-from app.services.importador_tablas import _normalizar, leer_tabla, normalizar_columnas
+from app.services.importador_tablas import _normalizar, leer_tabla, normalizar_columnas, valores_originales
 from app.services.impuestos import impuesto_de_texto, tipo_de_texto
 from app.services.tools import (
     ErrorDeLectura,
@@ -38,6 +38,9 @@ class LecturaMayor(NamedTuple):
     retenciones: list[dict]
     # Filas del HABER (aplicaciones/anulaciones): no participan del cruce.
     aplicaciones: list[dict]
+    # Saldo inicial y asiento de apertura: tampoco participan, pero van en la
+    # hoja LIBRO MAYOR del Excel para que el saldo corrido de igual.
+    saldos_iniciales: tuple[dict, ...] = ()
 
 
 def _es_encabezado_de_mayor(canonicas: set) -> bool:
@@ -87,12 +90,18 @@ def _desde_dataframe(df: pd.DataFrame, vacio_ok: bool = False) -> LecturaMayor:
 
     retenciones: list[dict] = []
     aplicaciones: list[dict] = []
+    saldos_iniciales: list[dict] = []
     sin_fecha = 0
 
-    for _, fila in df.iterrows():
+    for orden, (_, fila) in enumerate(df.iterrows()):
         descripcion = texto(columna(fila, "DETALLE")) or ""
         documento = texto(columna(fila, "DOCUMENTO")) or texto(columna(fila, "COMPROBANTE"))
+        cuenta = texto(columna(fila, "CUENTA")) or ""
+        # La fila tal cual y su lugar en el mayor, para la hoja LIBRO MAYOR del Excel.
+        copia = {"orden": orden, "original": valores_originales(columnas, fila)}
+
         if any(m in f"{descripcion} {documento or ''}".upper() for m in MARCAS_SALDO_INICIAL):
+            saldos_iniciales.append({**copia, "cuenta": cuenta, "impuesto": impuesto_de_texto(cuenta, descripcion) or ""})
             continue
 
         debe, haber = _importes(fila)
@@ -105,10 +114,10 @@ def _desde_dataframe(df: pd.DataFrame, vacio_ok: bool = False) -> LecturaMayor:
             sin_fecha += 1
             continue
 
-        cuenta = texto(columna(fila, "CUENTA")) or ""
         razon_social = texto(columna(fila, "RAZON_SOCIAL")) or ""
 
         movimiento = {
+            **copia,
             "fecha": fecha,
             "importe": round(debe if debe else haber, 2),
             "cuenta": cuenta,
@@ -135,7 +144,7 @@ def _desde_dataframe(df: pd.DataFrame, vacio_ok: bool = False) -> LecturaMayor:
         len(retenciones),
         len(aplicaciones),
     )
-    return LecturaMayor(retenciones, aplicaciones)
+    return LecturaMayor(retenciones, aplicaciones, tuple(saldos_iniciales))
 
 
 # ----------------------------------------------------------------------
@@ -210,14 +219,32 @@ def solo_cuentas_de(mayor: LecturaMayor, impuestos: set[str]) -> tuple[LecturaMa
 
     retenciones = [f for f in mayor.retenciones if es_de_la_cuenta(f)]
     aplicaciones = [f for f in mayor.aplicaciones if es_de_la_cuenta(f)]
-    return LecturaMayor(retenciones, aplicaciones), len(mayor.retenciones) - len(retenciones)
+    saldos = tuple(f for f in mayor.saldos_iniciales if es_de_la_cuenta(f))
+    return LecturaMayor(retenciones, aplicaciones, saldos), len(mayor.retenciones) - len(retenciones)
 
 
 def solo_cuentas(mayor: LecturaMayor, cuentas: list[str]) -> tuple[LecturaMayor, int]:
     """El mayor de esas cuentas de Xubio y cuantas filas de otras cuentas quedaron afuera."""
     retenciones = [f for f in mayor.retenciones if f.get("cuenta") in cuentas]
     aplicaciones = [f for f in mayor.aplicaciones if f.get("cuenta") in cuentas]
-    return LecturaMayor(retenciones, aplicaciones), len(mayor.retenciones) - len(retenciones)
+    saldos = tuple(f for f in mayor.saldos_iniciales if f.get("cuenta") in cuentas)
+    return LecturaMayor(retenciones, aplicaciones, saldos), len(mayor.retenciones) - len(retenciones)
+
+
+def unir(partes: list[LecturaMayor]) -> LecturaMayor:
+    """
+    Los mayores de varias cuentas en uno, una cuenta debajo de la otra: el
+    `orden` de cada parte se corre para que en el Excel no se mezclen.
+    """
+    retenciones, aplicaciones, saldos = [], [], []
+    desde = 0
+    for parte in partes:
+        filas = [*parte.retenciones, *parte.aplicaciones, *parte.saldos_iniciales]
+        for destino, origen in ((retenciones, parte.retenciones), (aplicaciones, parte.aplicaciones),
+                                (saldos, parte.saldos_iniciales)):
+            destino.extend({**f, "orden": desde + f.get("orden", 0)} for f in origen)
+        desde += 1 + max((f.get("orden", 0) for f in filas), default=0)
+    return LecturaMayor(retenciones, aplicaciones, tuple(saldos))
 
 
 def leer_mayor_desde_webreport(xml_texto: str, vacio_ok: bool = False, cuenta: str | None = None) -> LecturaMayor:
@@ -228,9 +255,12 @@ def leer_mayor_desde_webreport(xml_texto: str, vacio_ok: bool = False, cuenta: s
     `cuenta`: la cuenta elegida en la pantalla; el reporte de una sola cuenta
     puede venir sin la columna Cuenta.
     """
-    df = normalizar_columnas(_parsear_webreport(xml_texto))
-    if cuenta and not df.empty and "CUENTA" not in df.columns:
-        df["CUENTA"] = cuenta
+    # Se filtra con los nombres canonicos pero a _desde_dataframe van los
+    # titulos de Xubio: son los que copia el Excel de salida.
+    original = _parsear_webreport(xml_texto)
+    if cuenta and not original.empty and "CUENTA" not in normalizar_columnas(original).columns:
+        original["Cuenta"] = cuenta
+    df = normalizar_columnas(original)
     if df.empty:
         if vacio_ok:
             return LecturaMayor([], [])
@@ -241,7 +271,7 @@ def leer_mayor_desde_webreport(xml_texto: str, vacio_ok: bool = False, cuenta: s
             "cuentas de retenciones. Configurá XUBIO_CUENTA_REPORT_CODE con la cuenta puntual."
         )
 
-    de_retenciones = df[df["CUENTA"].map(lambda c: es_cuenta_de_retenciones(str(c)))]
+    de_retenciones = original[df["CUENTA"].map(lambda c: es_cuenta_de_retenciones(str(c)))]
     if de_retenciones.empty and vacio_ok:
         return LecturaMayor([], [])
     if de_retenciones.empty:

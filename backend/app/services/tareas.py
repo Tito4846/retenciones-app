@@ -19,7 +19,7 @@ from datetime import date
 from app.services.conciliador import conciliar_retenciones
 from app.services.importador_arca import leer_arca
 from app.services.importador_mayor import LecturaMayor, leer_mayor
-from app.services.tools import ErrorDeLectura
+from app.services.tools import ErrorDeLectura, OperacionCancelada
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ VIDA_RESULTADO_SEG = 2 * 60 * 60
 
 @dataclass
 class Tarea:
-    status: str = "pendiente"  # pendiente | procesando | completado | error
+    status: str = "pendiente"  # pendiente | procesando | completado | error | cancelado
     mensaje: str | None = None
     resultado: dict | None = None
     # Mientras procesa: en que paso va (xubio | arca | cruce) y que esta haciendo.
@@ -41,6 +41,8 @@ class Tarea:
     entrada: "Entrada | None" = None
     # {indice ARCA: indice mayor} emparejados a mano.
     manuales: dict[int, int] = field(default_factory=dict)
+    # La persona toco «Cancelar»: los bots lo miran entre paso y paso.
+    cancelada: threading.Event = field(default_factory=threading.Event)
 
 
 @dataclass
@@ -73,6 +75,36 @@ def _actualizar(task_id: str, **cambios) -> None:
         if tarea:
             for clave, valor in cambios.items():
                 setattr(tarea, clave, valor)
+
+
+def _terminar(task_id: str, **cambios) -> None:
+    """Deja el resultado final, salvo que la tarea ya se haya cancelado."""
+    with _lock:
+        tarea = _tareas.get(task_id)
+        if tarea and not tarea.cancelada.is_set():
+            for clave, valor in cambios.items():
+                setattr(tarea, clave, valor)
+
+
+def cancelar(task_id: str) -> bool:
+    """
+    Marca la tarea como cancelada. El bot no se corta en el medio de un clic:
+    termina lo que esta haciendo y frena antes del paso siguiente. False si la
+    tarea no existe o ya termino.
+    """
+    with _lock:
+        tarea = _tareas.get(task_id)
+        if tarea is None or tarea.status not in ("pendiente", "procesando"):
+            return False
+        tarea.cancelada.set()
+        tarea.status, tarea.mensaje = "cancelado", "Operación cancelada."
+    logger.info("Conciliacion %s cancelada", task_id)
+    return True
+
+
+def cancelada(task_id: str) -> bool:
+    tarea = obtener(task_id)
+    return tarea is not None and tarea.cancelada.is_set()
 
 
 def avanzar(task_id: str, paso: str, detalle: str | None = None) -> None:
@@ -113,17 +145,21 @@ def procesar_con(
     el resultado en la tarea. Los errores de lectura llegan a la pantalla tal
     cual; cualquier otro, con un mensaje generico y el detalle en el log.
     """
-    _actualizar(task_id, status="procesando")
+    _terminar(task_id, status="procesando")
     try:
         arca, mayor = cargar()
+        if cancelada(task_id):
+            return
         avanzar(task_id, "cruce", "Cruzando las retenciones de ARCA con el Libro Mayor…")
         entrada = Entrada(arca, mayor, hasta_periodo)
-        _actualizar(task_id, status="completado", entrada=entrada, resultado=_cruzar(entrada, {}))
+        _terminar(task_id, status="completado", entrada=entrada, resultado=_cruzar(entrada, {}))
+    except OperacionCancelada:
+        pass  # el estado ya dice «cancelado»
     except (ErrorDeLectura, ErrorDeConexion) as e:
-        _actualizar(task_id, status="error", mensaje=str(e))
+        _terminar(task_id, status="error", mensaje=str(e))
     except Exception:
         logger.exception("Fallo la conciliacion %s", task_id)
-        _actualizar(task_id, status="error", mensaje="Error inesperado al procesar los datos.")
+        _terminar(task_id, status="error", mensaje="Error inesperado al procesar los datos.")
 
 
 def _cruzar(entrada: Entrada, manuales: dict[int, int]) -> dict:

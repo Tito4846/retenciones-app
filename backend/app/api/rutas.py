@@ -65,9 +65,19 @@ def estado(task_id: str) -> dict:
         raise HTTPException(404, "La conciliación no existe o ya venció. Volvé a subir los archivos.")
     if tarea.status == "completado":
         return {"status": "completado", **tarea.resultado}
-    if tarea.status == "error":
-        return {"status": "error", "mensaje": tarea.mensaje}
+    if tarea.status in ("error", "cancelado"):
+        return {"status": tarea.status, "mensaje": tarea.mensaje}
     return {"status": tarea.status, "paso": tarea.paso, "detalle_paso": tarea.detalle_paso}
+
+
+@router.post("/cancelar/{task_id}")
+def cancelar(task_id: str) -> dict:
+    """Corta una conciliacion en curso (el bot frena antes del paso siguiente)."""
+    if tareas.obtener(task_id) is None:
+        raise HTTPException(404, "La conciliación no existe o ya venció.")
+    if not tareas.cancelar(task_id):
+        raise HTTPException(409, "La conciliación ya terminó: no hay nada que cancelar.")
+    return {"status": "cancelado"}
 
 
 class Par(BaseModel):
@@ -106,7 +116,7 @@ def exportar(task_id: str, empresa: str | None = None) -> Response:
     if tarea is None or tarea.status != "completado":
         raise HTTPException(404, "No hay una conciliación terminada para exportar.")
 
-    contenido = exportador.exportar(tarea.resultado, empresa=empresa)
+    contenido = exportador.exportar(tarea.resultado, tarea.entrada)
     nombre = exportador.nombre_archivo(empresa)
     # filename*=UTF-8'' para que los acentos lleguen bien al navegador.
     disposicion = f"attachment; filename=\"retenciones.xlsx\"; filename*=UTF-8''{quote(nombre)}"

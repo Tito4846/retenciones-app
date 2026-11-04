@@ -27,14 +27,14 @@ import tempfile
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import pandas as pd
 
 from app.services.importador_arca import leer_arca
 from app.services.importador_tablas import normalizar_columnas
 from app.services.impuestos import CODIGOS_ARCA, impuesto_de_texto
-from app.services.tools import ErrorDeLectura
+from app.services.tools import ErrorDeLectura, OperacionCancelada, nunca_cancelada
 
 logger = logging.getLogger(__name__)
 
@@ -262,7 +262,8 @@ def _leer_tablas(pestana: Any) -> pd.DataFrame | None:
     return pd.concat(paginas, ignore_index=True) if paginas else None
 
 
-def _enviar(pestana: Any, avisos: list[str], impuesto: str, espera_s: int = 120) -> None:
+def _enviar(pestana: Any, avisos: list[str], impuesto: str, espera_s: int = 120,
+            cancelada: Callable[[], bool] = nunca_cancelada) -> None:
     """
     Toca Consultar y espera la pagina de resultados. evaluateForm valida con
     alert() y, si algo no le gusta, no envia: en ese caso no hay navegacion y
@@ -273,6 +274,8 @@ def _enviar(pestana: Any, avisos: list[str], impuesto: str, espera_s: int = 120)
     pestana.evaluate("() => { window.__botMisret = true; }")
     pestana.click(SEL_CONSULTAR, no_wait_after=True)
     for _ in range(espera_s * 4):
+        if cancelada():
+            raise OperacionCancelada()
         if avisos:
             raise ErrorConsulta(f"ARCA rechazó la consulta del impuesto {impuesto}: {avisos[-1]}")
         try:
@@ -286,14 +289,15 @@ def _enviar(pestana: Any, avisos: list[str], impuesto: str, espera_s: int = 120)
 
 
 def consultar_impuesto(pestana: Any, url_formulario: str, consulta: ConsultaArca, impuesto: str,
-                       carpeta: Path, avisos: list[str]) -> list[dict]:
+                       carpeta: Path, avisos: list[str],
+                       cancelada: Callable[[], bool] = nunca_cancelada) -> list[dict]:
     """La consulta de un impuesto. Devuelve las retenciones ya leidas."""
     if "getForm" not in (pestana.url or ""):
         pestana.goto(url_formulario)
     pestana.wait_for_selector(SEL_FORM)
     _completar(pestana, consulta, impuesto)
 
-    _enviar(pestana, avisos, impuesto)
+    _enviar(pestana, avisos, impuesto, cancelada=cancelada)
 
     ruta = _exportar(pestana, carpeta)
     if ruta is None:

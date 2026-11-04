@@ -8,7 +8,7 @@ certificado. Es el lado "lo que el fisco dice que te retuvieron".
 
 import logging
 
-from app.services.importador_tablas import leer_tabla, normalizar_columnas
+from app.services.importador_tablas import leer_tabla, normalizar_columnas, valores_originales
 from app.services.impuestos import impuesto_de_texto, tipo_de_texto
 from app.services.tools import (
     ErrorDeLectura,
@@ -29,7 +29,8 @@ def _es_encabezado_arca(canonicas: set) -> bool:
 def leer_arca(ruta: str) -> list[dict]:
     """
     Devuelve las retenciones como {cuit, razon_social, fecha, importe, impuesto,
-    certificado, comprobante, regimen, tipo}. La fila de total del pie se saltea.
+    certificado, comprobante, regimen, tipo, original}. La fila de total del pie
+    se saltea.
 
     El importe va en positivo: una percepcion anulada viene en negativo en ARCA
     y se conserva con signo, para que no se empareje con un asiento normal.
@@ -82,6 +83,8 @@ def leer_arca(ruta: str) -> list[dict]:
                 "regimen": texto(columna(fila, "REGIMEN")),
                 # "Descripción Operación": RETENCION o PERCEPCION.
                 "tipo": tipo_de_texto(columna(fila, "DETALLE")),
+                # La fila tal cual, para la hoja ARCA del Excel de salida.
+                "original": valores_originales(columnas, fila),
             }
         )
 

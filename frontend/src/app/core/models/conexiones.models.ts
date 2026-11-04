@@ -48,6 +48,8 @@ export interface ConexionArca {
   descarga: DescargaArca | null;
   formulario: FormularioArca | null;
   consultando: boolean;
+  /** La sesión venció (o estaba por vencer) y el bot vuelve a entrar solo con los mismos datos. */
+  renovando?: boolean;
 }
 
 export interface ConexionXubio {

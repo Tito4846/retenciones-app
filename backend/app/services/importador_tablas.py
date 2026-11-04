@@ -271,6 +271,23 @@ def _leer_xlsx(ruta: str, es_encabezado: EsEncabezado) -> pd.DataFrame:
     return pd.read_excel(ruta, header=fila_encabezado, dtype=object)
 
 
+def valores_originales(columnas: list[str], fila: pd.Series) -> dict:
+    """
+    {encabezado original: valor} de una fila, tal como vino en el archivo. Lo
+    usa el Excel de salida para copiar las hojas de ARCA y del mayor iguales.
+    `columnas` son los encabezados antes de normalizar_columnas (que solo
+    renombra: el orden de los valores es el mismo).
+    """
+    salida = {}
+    for nombre, valor in zip(columnas, fila.tolist()):
+        if valor is None or (not isinstance(valor, str) and pd.isna(valor)):
+            valor = None
+        elif isinstance(valor, pd.Timestamp):
+            valor = valor.to_pydatetime()
+        salida[nombre] = valor
+    return salida
+
+
 def leer_tabla(ruta: str, es_encabezado: EsEncabezado) -> pd.DataFrame:
     """Lee un Excel/CSV con el encabezado que decide es_encabezado."""
     extension = os.path.splitext(ruta)[1].lower()

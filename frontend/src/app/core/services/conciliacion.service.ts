@@ -121,11 +121,18 @@ export class ConciliacionService {
             return { fase: 'completado', taskId, resultado: res };
           case 'error':
             return { fase: 'error', mensaje: res.mensaje ?? 'El procesamiento falló.' };
+          case 'cancelado':
+            return { fase: 'cancelado' };
           default:
             return { fase: 'procesando', taskId, paso: res.paso, detalle: res.detalle_paso };
         }
       }),
     );
+  }
+
+  /** Corta una conciliación en curso: el bot frena antes del paso siguiente. */
+  cancelar(taskId: string): Observable<unknown> {
+    return this.http.post(`${this.apiUrl}/cancelar/${taskId}`, {});
   }
 
   /** Concilia a mano una retención de ARCA con un asiento del mayor; devuelve el cruce rehecho. */

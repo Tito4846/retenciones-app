@@ -17,8 +17,10 @@ from app.core.config import settings
 from app.services.importador_arca import leer_arca
 from app.services.cuentas_xubio import elegir_cuentas
 from app.services.importador_mayor import LecturaMayor, leer_mayor_desde_webreport, solo_cuentas, solo_cuentas_de
+from app.services.importador_mayor import unir as unir_mayores
 from app.services.impuestos import impuesto_de_texto
 from app.services.tareas import ErrorDeConexion, _leer
+from app.services.tools import OperacionCancelada, nunca_cancelada
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +83,12 @@ PASO_XUBIO = "xubio"
 PASO_ARCA = "arca"
 
 Avance = Callable[[str, str], None]
+Cancelada = Callable[[], bool]
+
+
+def _frenar_si(cancelada: Cancelada) -> None:
+    if cancelada():
+        raise OperacionCancelada()
 
 
 def traer_automatico(
@@ -91,6 +99,7 @@ def traer_automatico(
     tipo: str = "RetencionPercepcion",
     cuit_agente: str | None = None,
     avance: Avance = lambda paso, detalle: None,
+    cancelada: Cancelada = nunca_cancelada,
 ) -> tuple[list[dict], LecturaMayor]:
     """
     Todo sin archivos, en el orden en que lo haria una persona:
@@ -114,9 +123,10 @@ def traer_automatico(
         tipo=tipo,
         cuit_agente=cuit_agente,
     )
+    _frenar_si(cancelada)
     avance(PASO_ARCA, f"Consultando Mis Retenciones en ARCA del {desde:%d/%m/%Y} al {hasta:%d/%m/%Y}…")
     try:
-        descarga = arca.consultar_y_esperar(consulta, lambda detalle: avance(PASO_ARCA, detalle))
+        descarga = arca.consultar_y_esperar(consulta, lambda detalle: avance(PASO_ARCA, detalle), cancelada)
     except (ArcaDesconectado, misret.ErrorConsulta) as e:
         raise ErrorDeConexion(str(e)) from e
     retenciones = _leer("Retenciones de ARCA", leer_arca, str(descarga.ruta)) if descarga.filas else []
@@ -124,11 +134,17 @@ def traer_automatico(
     descripciones = {o["codigo"]: o["descripcion"] for o in opciones}
     nombres = {impuesto_de_texto(c, descripciones.get(c)) for c in impuestos}
     hasta_mayor = hasta + timedelta(days=settings.TOLERANCIA_DIAS)
-    return retenciones, libro_mayor_de_la_consulta(desde, hasta_mayor, nombres, tipo, avance)
+    _frenar_si(cancelada)
+    return retenciones, libro_mayor_de_la_consulta(desde, hasta_mayor, nombres, tipo, avance, cancelada)
 
 
 def libro_mayor_de_la_consulta(
-    desde: date, hasta: date, impuestos: set[str | None], tipo: str, avance: Avance = lambda paso, detalle: None
+    desde: date,
+    hasta: date,
+    impuestos: set[str | None],
+    tipo: str,
+    avance: Avance = lambda paso, detalle: None,
+    cancelada: Cancelada = nunca_cancelada,
 ) -> LecturaMayor:
     """
     El Libro Mayor de Xubio de las cuentas que corresponden a la consulta de
@@ -142,6 +158,7 @@ def libro_mayor_de_la_consulta(
             return _mayor_por_reporte(desde, hasta, avance)
         partes = []
         for impuesto in sorted(impuestos):
+            _frenar_si(cancelada)
             leidos = xubio.libro_mayor_por_pantalla(
                 desde, hasta, impuesto, tipo, lambda detalle: avance(PASO_XUBIO, detalle)
             )
@@ -153,11 +170,10 @@ def libro_mayor_de_la_consulta(
                         xml,
                     )
                 )
-        return LecturaMayor(
-            [m for p in partes for m in p.retenciones], [m for p in partes for m in p.aplicaciones]
-        )
+        return unir_mayores(partes)
     except ErrorPantallaXubio as e:
         logger.warning("Libro Mayor por pantalla: %s. Se usa el reporte.", e)
+        _frenar_si(cancelada)
         avance(PASO_XUBIO, f"{e} Sigo con el reporte del Libro Mayor.")
         return cuenta_de_la_consulta(_mayor_por_reporte(desde, hasta, avance), impuestos, tipo)
     except (XubioDesconectado, ErrorXubio) as e:

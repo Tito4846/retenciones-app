@@ -12,10 +12,12 @@ Facilidades) y lo que se hace despues:
   subida manual. Asi el bot no depende de los botones internos del formulario
   de consulta, que cambian sin aviso.
 
-La clave fiscal se usa una sola vez para el login y no se guarda (ni en disco ni
-en memoria): si ARCA vence la sesion, hay que volver a conectar. Para que no
-venza mientras la ventana esta quieta, cada tanto se le pide la pagina a ARCA
-con las cookies de la ventana (sin moverla).
+La clave fiscal no se guarda en disco: queda solo en la memoria del hilo del
+navegador mientras la ventana esta abierta, para que la sesion se renueve sola
+con los mismos datos cuando ARCA la vence (o antes, ver ARCA_RENOVAR_SESION_MIN).
+Al cerrar la ventana se pierde. Para que no venza mientras la ventana esta
+quieta, cada tanto se le pide la pagina a ARCA con las cookies de la ventana
+(sin moverla).
 
 Playwright (la API sync) solo se puede usar desde el hilo que abrio el
 navegador: el navegador vive en un hilo propio y la API le encola pedidos.
@@ -48,7 +50,7 @@ from app.bots.chrome import (
 from app.bots import misret
 from app.core.config import settings
 from app.services.importador_arca import leer_arca
-from app.services.tools import ErrorDeLectura
+from app.services.tools import ErrorDeLectura, OperacionCancelada, nunca_cancelada
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +65,11 @@ _VIGILANCIA_S = 1.0
 # Marca del formulario de login: si aparece, ARCA vencio la sesion.
 _MARCA_LOGIN = "F1:username"
 
+MENSAJE_CANCELADA = "Consulta cancelada: corregí lo que haga falta y volvé a consultar."
+# Sin pedidos durante este tiempo se puede renovar la sesion antes de que venza.
+_QUIETA_PARA_RENOVAR_S = 60
+# Antes de un pedido se revisa que la sesion siga viva si no se reviso hace este tiempo.
+_REVISAR_ANTES_DE_USAR_S = 60
 MENSAJE_CERRADO = "Se cerró la ventana de ARCA: tocá «Conectar ARCA» para volver a entrar."
 MENSAJE_CONECTADO = (
     "Conectado a Mis Retenciones: elegí el período y el impuesto, y tocá «Traer y conciliar» "
@@ -99,8 +106,8 @@ class DescargaArca:
 # Login y entrada al servicio (de Arca-bot fase1_sesion.py)
 # ----------------------------------------------------------------------
 
-def _login(pagina: Any, cuit: str, clave: str, reportar: Callable[[str], None]) -> None:
-    """CUIT + clave fiscal en auth.afip.gob.ar, con espera del doble factor."""
+def _login(pagina: Any, cuit: str, clave: str, reportar: Callable[[str], None]) -> bool:
+    """CUIT + clave fiscal en auth.afip.gob.ar, con espera del doble factor. True si lo pidio."""
     s = settings
     pagina.goto(s.ARCA_URL_LOGIN, timeout=s.TIMEOUT_LOGIN_MS)
     pagina.fill(s.ARCA_SEL_CUIT_LOGIN, cuit)
@@ -108,9 +115,11 @@ def _login(pagina: Any, cuit: str, clave: str, reportar: Callable[[str], None]) 
     pagina.fill(s.ARCA_SEL_CLAVE, clave)
     pagina.click(s.ARCA_SEL_BTN_INGRESAR)
 
+    doble_factor = False
     try:
         pagina.wait_for_selector(s.ARCA_SEL_BUSCADOR, timeout=s.TIMEOUT_LOGIN_MS)
     except Exception as error:
+        doble_factor = True
         espera_2fa = s.TIMEOUT_2FA_MS or 0
         if s.HEADLESS or espera_2fa <= 0:
             raise ErrorArca(
@@ -125,6 +134,7 @@ def _login(pagina: Any, cuit: str, clave: str, reportar: Callable[[str], None]) 
                 "No se pudo entrar a ARCA: revisá la CUIT y la clave fiscal, o completá el doble factor a tiempo."
             ) from error_2fa
     pagina.wait_for_timeout(500)
+    return doble_factor
 
 
 def _sin_acentos(texto: str) -> str:
@@ -156,7 +166,7 @@ def _esperar_el_servicio(pagina: Any) -> None:
 def _entrar_al_servicio(pagina: Any) -> Any:
     """
     Abre el servicio desde "Mas utilizados" o, si no esta, por el buscador del
-    portal (dos flechas abajo + Enter, con clic de respaldo). Devuelve la
+    portal (clic en la sugerencia con el nombre exacto). Devuelve la
     pestana del servicio, que ARCA suele abrir aparte.
     """
     s = settings
@@ -181,19 +191,13 @@ def _entrar_al_servicio(pagina: Any) -> Any:
     buscador.press_sequentially(servicio[-1:], delay=s.RETRASO_TIPEO_MS)
     _esperar_el_servicio(pagina)
     pagina.wait_for_timeout(800)
-    pagina.keyboard.press("ArrowDown")
-    pagina.keyboard.press("ArrowDown")
-    pagina.wait_for_timeout(200)
-    try:
-        with pagina.context.expect_page(timeout=s.TIMEOUT_SERVICIO_MS) as info:
-            pagina.keyboard.press("Enter")
-        return info.value
-    except Exception:  # noqa: BLE001
-        if _sitio(pagina.url) != sitio_portal:
-            return pagina
 
-    visibles = pagina.get_by_text(servicio, exact=False).filter(visible=True)
-    for indice in reversed(range(min(visibles.count(), 5))):
+    # Solo la sugerencia que se llama exactamente como el servicio: el buscador
+    # tambien ofrece otros parecidos ("Retenciones - Reclamos") y elegir por
+    # posicion (flechas + Enter) abria el que no era.
+    patron = re.compile(rf"^\s*{re.escape(servicio)}\s*$", re.IGNORECASE)
+    visibles = pagina.get_by_text(patron).filter(visible=True)
+    for indice in range(min(visibles.count(), 5)):
         try:
             with pagina.context.expect_page(timeout=s.TIMEOUT_SERVICIO_MS) as info:
                 visibles.nth(indice).click()
@@ -401,6 +405,10 @@ class NavegadorArca:
         self._formulario: dict | None = None
         self._url_formulario: str | None = None
         self._consultando = False
+        # «Cancelar» de «Solo consultar ARCA»: la consulta frena en el proximo impuesto.
+        self._cancelar = threading.Event()
+        # Volviendo a entrar solo porque la sesion vencio (o estaba por vencer).
+        self._renovando = False
         # Textos de los alert() de ARCA (el formulario valida con alert).
         self._avisos: list[str] = []
         self._descargas: list[Any] = []
@@ -474,15 +482,29 @@ class NavegadorArca:
         self._reservar(consulta)
         threading.Thread(target=self._consultar, args=(consulta,), name="consulta-arca", daemon=True).start()
 
+    def cancelar(self) -> None:
+        """Corta la consulta en curso: termina lo que esta haciendo y no sigue."""
+        with self._candado:
+            if not self._consultando:
+                return
+            self._cancelar.set()
+        self._fijar(CONECTADO, "Cancelando la consulta: el bot frena en cuanto ARCA responda…")
+
     def consultar_y_esperar(
-        self, consulta: misret.ConsultaArca, avance: Callable[[str], None] | None = None
+        self,
+        consulta: misret.ConsultaArca,
+        avance: Callable[[str], None] | None = None,
+        cancelada: Callable[[], bool] = nunca_cancelada,
     ) -> DescargaArca:
         """Lo mismo que consultar() pero en el hilo que llama: para el flujo automatico."""
         self._reservar(consulta)
         try:
-            return self._traer(consulta, avance)
+            return self._traer(consulta, avance, cancelada)
         except (misret.ErrorConsulta, ErrorDeLectura) as error:
             self._fijar(CONECTADO, str(error))
+            raise
+        except OperacionCancelada:
+            self._fijar(CONECTADO, MENSAJE_CANCELADA)
             raise
         finally:
             with self._candado:
@@ -500,12 +522,15 @@ class NavegadorArca:
             if self._consultando:
                 raise misret.ErrorConsulta("Ya hay una consulta en curso.")
             self._consultando = True
+            self._cancelar.clear()
 
     def _consultar(self, consulta: misret.ConsultaArca) -> None:
         try:
             self._traer(consulta)
         except (misret.ErrorConsulta, ErrorDeLectura) as error:
             self._fijar(CONECTADO, str(error))
+        except OperacionCancelada:
+            self._fijar(CONECTADO, MENSAJE_CANCELADA)
         except ArcaDesconectado:
             pass  # el estado ya lo dice
         except Exception as error:  # noqa: BLE001
@@ -515,10 +540,19 @@ class NavegadorArca:
             with self._candado:
                 self._consultando = False
 
-    def _traer(self, consulta: misret.ConsultaArca, avance: Callable[[str], None] | None = None) -> DescargaArca:
+    def _traer(
+        self,
+        consulta: misret.ConsultaArca,
+        avance: Callable[[str], None] | None = None,
+        cancelada: Callable[[], bool] = nunca_cancelada,
+    ) -> DescargaArca:
         """Consulta cada impuesto y deja el resultado combinado como la descarga de ARCA."""
+
+        def frenar() -> bool:
+            return self._cancelar.is_set() or cancelada()
+
         retenciones = self.ejecutar(
-            lambda pestana, contexto: self._consultar_en_ventana(pestana, contexto, consulta, avance)
+            lambda pestana, contexto: self._consultar_en_ventana(pestana, contexto, consulta, avance, frenar)
         )
         nombre = (
             f"Mis Retenciones {consulta.cuit_retenido} {'+'.join(consulta.impuestos)} "
@@ -542,19 +576,22 @@ class NavegadorArca:
         contexto: Any,
         consulta: misret.ConsultaArca,
         avance: Callable[[str], None] | None = None,
+        cancelada: Callable[[], bool] = nunca_cancelada,
     ) -> list[dict]:
         """En el hilo del navegador: una consulta por impuesto, con captura de cada resultado."""
         carpeta = misret.carpeta_temporal()
         retenciones: list[dict] = []
         try:
             for numero, impuesto in enumerate(consulta.impuestos, start=1):
+                if cancelada():
+                    raise OperacionCancelada()
                 mensaje = f"Consultando el impuesto {impuesto} en ARCA ({numero} de {len(consulta.impuestos)})…"
                 self._fijar(CONECTADO, mensaje)
                 if avance:
                     avance(mensaje)
                 try:
                     retenciones += misret.consultar_impuesto(
-                        pestana, self._url_formulario, consulta, impuesto, carpeta, self._avisos
+                        pestana, self._url_formulario, consulta, impuesto, carpeta, self._avisos, cancelada
                     )
                 finally:
                     capturar_paginas(contexto, self._debug, f"arca_resultado_{impuesto}")
@@ -591,6 +628,7 @@ class NavegadorArca:
             "descarga": self._descarga.a_dict() if self._descarga else None,
             "formulario": self._formulario,
             "consultando": self._consultando,
+            "renovando": self._renovando,
         }
 
     def _fijar(self, estado: str, mensaje: str | None) -> None:
@@ -623,22 +661,18 @@ class NavegadorArca:
                 contexto.on("page", escuchar)
                 escuchar(pagina)
 
-                _login(pagina, cuit, sobre_clave.pop(), lambda m: self._fijar(CONECTANDO, m))
-                self._fijar(CONECTANDO, f"Abriendo «{settings.ARCA_SERVICIO}»…")
-                pestana = _entrar_al_servicio(pagina)
-                pestana.wait_for_load_state("domcontentloaded")
-                if settings.ARCA_VERSION_ANTERIOR:
-                    self._fijar(CONECTANDO, "Pasando a la versión anterior de Mis Retenciones…")
-                    pestana = _ir_a_version_anterior(pestana)
-                    pestana.wait_for_load_state("domcontentloaded")
-                try:
-                    pestana.wait_for_load_state("networkidle", timeout=8000)
-                except Exception:  # noqa: BLE001 - ARCA a veces deja pedidos abiertos
-                    pass
-                capturar_paginas(contexto, self._debug, "arca_servicio")
-                self._leer_formulario(pestana)
+                # La clave queda en este hilo (no en el objeto) para renovar la sesion.
+                clave = sobre_clave.pop()
+                doble_factor = _login(pagina, cuit, clave, lambda m: self._fijar(CONECTANDO, m))
+                pestana = self._abrir_servicio(contexto, pagina, CONECTANDO)
                 self._fijar(CONECTADO, MENSAJE_CONECTADO if self._formulario else MENSAJE_SIN_FORMULARIO)
-                self._atender(contexto, pestana, descargas)
+
+                def renovar(pestana_vieja: Any, motivo: str) -> Any | None:
+                    nonlocal pagina
+                    pestana_nueva, pagina = self._renovar(contexto, pagina, pestana_vieja, cuit, clave, motivo)
+                    return pestana_nueva
+
+                self._atender(contexto, pestana, descargas, renovar, anticipar=not doble_factor)
         except BaseException as error:  # noqa: BLE001 - Chrome o ARCA pueden fallar de mil formas
             sobre_clave.clear()
             if isinstance(error, ErrorArca):
@@ -650,6 +684,71 @@ class NavegadorArca:
                 self._fijar(DESCONECTADO, f"No se pudo conectar con ARCA: {error}")
         finally:
             self._vaciar_cola()
+
+    def _abrir_servicio(self, contexto: Any, pagina: Any, estado: str) -> Any:
+        """Del portal ya logueado a Mis Retenciones (version anterior), con el formulario leido."""
+        self._fijar(estado, f"Abriendo «{settings.ARCA_SERVICIO}»…")
+        pestana = _entrar_al_servicio(pagina)
+        pestana.wait_for_load_state("domcontentloaded")
+        if settings.ARCA_VERSION_ANTERIOR:
+            self._fijar(estado, "Pasando a la versión anterior de Mis Retenciones…")
+            pestana = _ir_a_version_anterior(pestana)
+            pestana.wait_for_load_state("domcontentloaded")
+        try:
+            pestana.wait_for_load_state("networkidle", timeout=8000)
+        except Exception:  # noqa: BLE001 - ARCA a veces deja pedidos abiertos
+            pass
+        capturar_paginas(contexto, self._debug, "arca_servicio")
+        self._leer_formulario(pestana)
+        return pestana
+
+    def _renovar(
+        self, contexto: Any, pagina: Any, pestana_vieja: Any, cuit: str, clave: str, motivo: str
+    ) -> tuple[Any | None, Any]:
+        """
+        Vuelve a entrar con la misma CUIT y clave, en la misma ventana. Devuelve
+        (pestana del servicio, pagina del portal); la pestana es None si no se
+        pudo (el estado queda en desconectado con el motivo).
+        """
+        logger.info("ARCA: %s, se renueva la sesion", motivo)
+        with self._candado:
+            self._renovando = True
+        self._fijar(CONECTADO, f"{motivo}: entrando de nuevo a ARCA con los mismos datos…")
+        try:
+            if pagina.is_closed():
+                pagina = contexto.new_page()
+            # Sin las cookies viejas el login arranca de cero (con la sesion
+            # todavia viva ARCA saltearia el formulario de ingreso).
+            contexto.clear_cookies()
+
+            def reportar(mensaje: str) -> None:
+                # Doble factor: la persona lo tiene que ver para completarlo.
+                self._fijar(CONECTADO, mensaje)
+                mostrar_ventana(contexto, pagina)
+
+            _login(pagina, cuit, clave, reportar)
+            with self._candado:
+                self._formulario = self._url_formulario = None
+            pestana = self._abrir_servicio(contexto, pagina, CONECTADO)
+            if pestana_vieja not in (pestana, pagina) and not pestana_vieja.is_closed():
+                pestana_vieja.close()
+            if settings.MINIMIZAR_VENTANA and not settings.HEADLESS and self._formulario:
+                minimizar_ventana(contexto, pestana)
+            self._fijar(
+                CONECTADO,
+                "Sesión de ARCA renovada sola. " + (MENSAJE_CONECTADO if self._formulario else MENSAJE_SIN_FORMULARIO),
+            )
+            return pestana, pagina
+        except Exception as error:  # noqa: BLE001
+            if es_cierre(error):
+                raise
+            logger.warning("No se pudo renovar la sesion de ARCA: %s", error)
+            detalle = str(error) if isinstance(error, ErrorArca) else "ARCA no respondió."
+            self._fijar(DESCONECTADO, f"{motivo} y no se pudo volver a entrar solo: {detalle} Tocá «Conectar ARCA».")
+            return None, pagina
+        finally:
+            with self._candado:
+                self._renovando = False
 
     def _leer_formulario(self, pestana: Any) -> None:
         try:
@@ -664,14 +763,42 @@ class NavegadorArca:
                 self._formulario = formulario
                 self._url_formulario = pestana.url
 
-    def _atender(self, contexto: Any, pestana: Any, descargas: list[Any]) -> None:
+    def _atender(
+        self,
+        contexto: Any,
+        pestana: Any,
+        descargas: list[Any],
+        renovar: Callable[[Any, str], Any | None] | None = None,
+        anticipar: bool = False,
+    ) -> None:
+        """
+        Atiende los pedidos de la API y cuida la sesion. `renovar(pestana,
+        motivo)` vuelve a entrar con los mismos datos y devuelve la pestana nueva
+        (None si no se pudo). `anticipar`: renovar antes de que venza, al cumplir
+        ARCA_RENOVAR_SESION_MIN (no si el ingreso pidio doble factor).
+        """
         # Sin formulario la ventana queda a la vista: la persona tiene que tocar
         # "click aqui" para llegar a la version anterior.
         buscar_formulario = self.formulario() is None
         if settings.MINIMIZAR_VENTANA and not settings.HEADLESS and not buscar_formulario:
             minimizar_ventana(contexto, pestana)
-        ultimo_uso = time.monotonic()
+        ultimo_uso = time.monotonic()  # ultimo pedido o ultima revision de la sesion
+        ultimo_pedido = time.monotonic()
+        sesion_desde = time.monotonic()
+        renovar_cada = settings.ARCA_RENOVAR_SESION_MIN * 60
         proxima_busqueda = time.monotonic()
+
+        def renovada(motivo: str) -> bool:
+            nonlocal pestana, sesion_desde, ultimo_uso, buscar_formulario
+            nueva = renovar(pestana, motivo) if renovar else None
+            if nueva is None:
+                if renovar is None:
+                    self._fijar(DESCONECTADO, "ARCA venció la sesión: volvé a conectar.")
+                return False
+            pestana, buscar_formulario = nueva, self.formulario() is None
+            sesion_desde = ultimo_uso = time.monotonic()
+            return True
+
         while True:
             if not any(not p.is_closed() for p in contexto.pages):
                 self._fijar(DESCONECTADO, MENSAJE_CERRADO)
@@ -686,8 +813,16 @@ class NavegadorArca:
                     self._fijar(CONECTADO, MENSAJE_CONECTADO)
             if time.monotonic() - ultimo_uso > MANTENER_VIVA_S:
                 ultimo_uso = time.monotonic()
-                if not self._mantener_viva(contexto, pestana):
-                    self._fijar(DESCONECTADO, "ARCA venció la sesión: volvé a conectar.")
+                if not self._mantener_viva(contexto, pestana) and not renovada("ARCA venció la sesión"):
+                    return
+            elif (
+                anticipar
+                and renovar_cada > 0
+                and not buscar_formulario
+                and time.monotonic() - sesion_desde > renovar_cada
+                and time.monotonic() - ultimo_pedido > _QUIETA_PARA_RENOVAR_S
+            ):
+                if not renovada("La sesión de ARCA está por vencer"):
                     return
             try:
                 item = self._cola.get(timeout=_VIGILANCIA_S)
@@ -696,7 +831,12 @@ class NavegadorArca:
             if item is None:
                 return
             fn, futuro = item
-            ultimo_uso = time.monotonic()
+            # Un pedido con la sesion vencida fallaria a mitad: antes se revisa.
+            if time.monotonic() - ultimo_uso > _REVISAR_ANTES_DE_USAR_S and not self._mantener_viva(contexto, pestana):
+                if not renovada("ARCA venció la sesión"):
+                    futuro.set_exception(ArcaDesconectado("ARCA venció la sesión y no se pudo volver a entrar solo."))
+                    return
+            ultimo_uso = ultimo_pedido = time.monotonic()
             if futuro.set_running_or_notify_cancel():
                 try:
                     futuro.set_result(fn(pestana, contexto))

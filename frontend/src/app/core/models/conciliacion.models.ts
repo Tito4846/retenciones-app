@@ -63,6 +63,20 @@ export interface ResumenConciliacion {
   hasta_periodo?: string | null;
   /** Filas del Haber (aplicaciones a la DDJJ): no participan del cruce. */
   aplicaciones_mayor?: number;
+  /** Por qué la diferencia no da 0; sumados dan `diferencia`. Vacío si da 0. */
+  motivos_diferencia?: MotivoDiferencia[];
+}
+
+/** Una causa de la diferencia ARCA − Mayor y las filas responsables. */
+export interface MotivoDiferencia {
+  /** Las dos bandejas de faltantes, o conciliados con importe distinto. */
+  motivo: 'faltan_en_mayor' | 'faltan_en_arca' | 'redondeos';
+  descripcion: string;
+  cantidad: number;
+  /** Lo que suma (o resta) a la diferencia. */
+  importe: number;
+  /** Ids de las filas responsables ("a3" de ARCA, "m7" del mayor). */
+  ids: string[];
 }
 
 /** ARCA vs. mayor de un impuesto: el control antes de computarlo en la DDJJ. */
@@ -132,7 +146,7 @@ export interface TareaCreadaResponse {
 /** Respuesta de GET /api/estado/{task_id}. */
 export type EstadoTareaResponse =
   | { status: 'pendiente' | 'procesando'; paso?: PasoAutomatico | null; detalle_paso?: string | null }
-  | { status: 'error'; mensaje?: string }
+  | { status: 'error' | 'cancelado'; mensaje?: string }
   | ConciliacionResultado;
 
 /** Estado unificado que el servicio emite hacia la UI. */
@@ -140,7 +154,8 @@ export type ConciliacionEstado =
   | { fase: 'subiendo'; progreso: number }
   | { fase: 'procesando'; taskId: string; paso?: PasoAutomatico | null; detalle?: string | null }
   | { fase: 'completado'; taskId: string; resultado: ConciliacionResultado }
-  | { fase: 'error'; mensaje: string };
+  | { fase: 'error'; mensaje: string }
+  | { fase: 'cancelado' };
 
 /** El Excel generado por el backend, listo para descargar. */
 export interface ArchivoExportado {

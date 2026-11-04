@@ -1,426 +1,480 @@
 """
-Arma el papel de trabajo de la conciliacion de retenciones.
-
-Toma los estilos y utilidades del exportador del FO 02-03 (encabezado celeste,
-amarillo = tiene coincidencia, estado en texto, formato de importe contable,
-logo en A1:B3) para que los dos papeles se lean igual. A diferencia del
-bancario no hay plantilla de auditoria: el membrete se escribe aca.
+Arma el Excel de la conciliacion de retenciones, en el formato en que se
+trabaja a mano: las dos planillas originales, una en cada hoja, con lo
+conciliado pintado de amarillo.
 
 Hojas:
-    Resumen            A/B/C con cantidad y monto, los primeros casos de B y C
-                       y los totales por impuesto.
-    Conciliados        A: ARCA + asiento del Libro Mayor, con la clave del cruce.
-    Faltan_en_ARCA     B: registradas en el Libro Mayor de Xubio sin certificado en ARCA (reclamo).
-    Faltan_en_Mayor      C: declaradas en ARCA sin registrar en el Libro Mayor de Xubio (ajuste).
+    ARCA         El export de Mis Retenciones tal cual (mismas columnas y
+                 orden), el importe conciliado en amarillo y el total al pie.
+    LIBRO MAYOR  El Libro Mayor de Xubio tal cual, con el Debe conciliado en
+                 amarillo y el saldo corrido con formula. Debajo, sin encabezado
+                 de columnas, cada uno con su titulo y separados por dos filas
+                 en blanco:
+                   - «Partidas de ARCA pendientes de registracion»: lo que
+                     informa ARCA y no esta en el mayor (tipo, agente e importe
+                     en el Debe), y
+                   - «Partidas contabilizadas - revisar procedencia / revisar
+                     cliente»: lo que esta en el mayor y ARCA no informa,
+                     repetido con el importe en el Haber,
+                 asi el saldo final da lo que informa ARCA. Al pie va el control:
+                 saldo ARCA, saldo Xubio (el saldo corrido ajustado) y la
+                 diferencia, que deberia dar 0.
 """
 
 from __future__ import annotations
 
 import io
-import logging
-from collections import defaultdict
 from datetime import date, datetime
-from pathlib import Path
 
 from openpyxl import Workbook
-from openpyxl.drawing.image import Image as ImagenExcel
-from openpyxl.drawing.spreadsheet_drawing import AnchorMarker, OneCellAnchor
-from openpyxl.drawing.xdr import XDRPositiveSize2D
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
+from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
-from openpyxl.utils.units import pixels_to_EMU
 from openpyxl.worksheet.worksheet import Worksheet
 
 from app.core.config import settings
+from app.services.conciliador import id_arca, id_mayor
+from app.services.importador_tablas import _traducir_columna
+from app.services.tools import limpiar_numero, parse_fecha
 
-logger = logging.getLogger(__name__)
+# Los formatos de cada export: el contable de ARCA y el de Xubio.
+FORMATO_IMPORTE_ARCA = '_(* #,##0.00_);_(* \\(#,##0.00\\);_(* "-"??_);_(@_)'
+FORMATO_IMPORTE_MAYOR = '_-* #,##0.00_-;\\-* #,##0.00_-;_-* "-"??_-;_-@_-'
+FORMATO_FECHA_ARCA = "dd/mm/yyyy"
+FORMATO_FECHA_MAYOR = "mm-dd-yy"  # el formato corto de fecha de Excel, como lo exporta Xubio
 
-ANCHO_LOGO_MAX = 118  # px, entra en A:B con un margen
-ALTO_LOGO_MAX = 78    # px, entra en las filas 1-3
-
-FORMATO_IMPORTE = '_ * #,##0.00_ ;_ * \\-#,##0.00_ ;_ * "-"??_ ;_ @_ '
-FORMATO_FECHA = "dd/mm/yyyy"
-
-FILA_TITULO = 2
-FILA_ENCABEZADO = 8
-FILA_PRIMER_DATO = 9
-
-RELLENO_ENCABEZADO = PatternFill("solid", fgColor="FF00B0F0")
 RELLENO_CONCILIADO = PatternFill("solid", fgColor="FFFFFF00")  # amarillo: tiene coincidencia
-FUENTE_ENCABEZADO = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
-FUENTE_TITULO = Font(name="Calibri", size=14, bold=True)
-FUENTE_NEGRITA = Font(name="Calibri", size=11, bold=True)
-FUENTE_NORMAL = Font(name="Calibri", size=11)
-ALINEACION_CENTRO = Alignment(horizontal="center", vertical="center")
-ALINEACION_DERECHA = Alignment(horizontal="right", shrink_to_fit=True)
-BORDE_DOBLE = Border(top=Side(style="thin"), bottom=Side(style="double"))
 
-# Casos de B y C que se muestran en el resumen (el detalle completo, en su hoja).
-CASOS_EN_RESUMEN = 10
+# Filas en blanco entre el mayor y cada apartado de abajo (y antes del total de ARCA).
+FILAS_EN_BLANCO = 2
 
-ESTADO_CONCILIADO = "Conciliado"
-ESTADO_SIN_COINCIDENCIA = "Sin coincidencia"
+# Los apartados debajo del mayor.
+TITULO_PENDIENTES = "PARTIDAS DE ARCA PENDIENTES DE REGISTRACIÓN"  # ARCA las informa, el mayor no
+TITULO_CONTABILIZADAS = "PARTIDAS CONTABILIZADAS - REVISAR PROCEDENCIA / REVISAR CLIENTE"  # al reves
+NEGRITA = Font(bold=True)
+# Si el control no da 0: la DIF y los motivos al pie, en rojo.
+ROJO = "FFC00000"
+TITULO_MOTIVOS = "MOTIVOS DE LA DIFERENCIA:"
+CENTAVO = 0.005
 
-ETIQUETAS_CRITERIO = {
-    "comprobante": "Nro. de comprobante",
-    "cuit_importe": "CUIT + importe",
-    "razon_social": "Razón social + importe + fecha",
-    "importe_fecha": "Importe + fecha",
-    "diferencia_menor": "Mismo agente, centavos de diferencia",
-    "manual": "Conciliado a mano",
-}
+# Si la fila no trae lo que vino en el archivo (otra fuente), se arma con estas columnas.
+COLUMNAS_ARCA = [
+    "CUIT Agente Ret./Perc.", "Denominación o Razón Social", "Impuesto", "Descripción Impuesto",
+    "Régimen", "Descripción Régimen", "Fecha Ret./Perc.", "Número Certificado",
+    "Descripción Operación", "Importe Ret./Perc.", "Número Comprobante", "Fecha Comprobante",
+    "Descripción Comprobante", "Fecha Registración DJ Ag.Ret.",
+]
+COLUMNAS_MAYOR = ["Fecha", "Documento", "Cuenta", "Debe", "Haber", "Saldo", "Descripción", "Organización"]
+
+# Anchos de las columnas de los exports de ejemplo (por posicion).
+ANCHOS_ARCA = [20.6, 40, 8.6, 32.3, 8.3, 60, 15.1, 16.9, 19.9, 16.3, 19.1, 17.9, 22.6, 27]
+ANCHOS_MAYOR = [10.1, 26.6, 36.4, 12.9, 12.9, 13.1, 40, 31.1, 15.4]
 
 
 # ----------------------------------------------------------------------
-# Utilidades (mismas que el exportador del FO 02-03)
+# Utilidades
 # ----------------------------------------------------------------------
 
-def _fecha(valor: object) -> date | None:
+def _columnas_por_rol(encabezados: list[str]) -> dict[str, int]:
+    """{FECHA: 0, DEBE: 3, ...}: solo encabezados que coinciden exacto con un alias."""
+    roles: dict[str, int] = {}
+    for k, nombre in enumerate(encabezados):
+        canonica, exacta = _traducir_columna(nombre)
+        if canonica and exacta:
+            roles.setdefault(canonica, k)
+    return roles
+
+
+def _encabezados(filas: list[dict], por_defecto: list[str]) -> list[str]:
+    """Las columnas del archivo, sin las que no tienen titulo (anotaciones a mano al costado)."""
+    originales = next((list(f["original"]) for f in filas if f.get("original")), por_defecto)
+    return [c for c in originales if not str(c).startswith("Unnamed:")]
+
+
+def _numero(valor) -> float | None:
+    n = round(limpiar_numero(valor), 2)
+    return n or None
+
+
+def _valor_celda(valor):
     if isinstance(valor, datetime):
         return valor.date()
-    if isinstance(valor, date):
-        return valor
-    if isinstance(valor, str) and valor.strip():
-        for fmt in ("%Y-%m-%d", "%d/%m/%Y"):
-            try:
-                return datetime.strptime(valor.strip()[:10], fmt).date()
-            except ValueError:
+    return valor
+
+
+def _escribir(hoja: Worksheet, fila: int, valores: list, formato_fecha: str = FORMATO_FECHA_ARCA) -> None:
+    for k, valor in enumerate(valores, start=1):
+        if valor is not None and valor != "":
+            if isinstance(valor, str):
+                # Caracteres de control que openpyxl no acepta (vienen en algun export).
+                valor = ILLEGAL_CHARACTERS_RE.sub("", valor)
+            celda = hoja.cell(row=fila, column=k, value=_valor_celda(valor))
+            if isinstance(valor, str) and valor.startswith("="):
+                celda.data_type = "s"  # un texto que empieza con "=" no es una formula
+            if isinstance(celda.value, date):
+                celda.number_format = formato_fecha
+
+
+def _ajustar_anchos(hoja: Worksheet, anchos: list[float], cantidad: int) -> None:
+    for k in range(cantidad):
+        hoja.column_dimensions[get_column_letter(k + 1)].width = anchos[k] if k < len(anchos) else 15
+
+
+# Lo que ocupa una fecha (dd/mm/yyyy) o un importe con el formato contable, en caracteres.
+ANCHO_FECHA = 12
+MARGEN_IMPORTE = 4  # los espacios y el signo del formato contable
+
+
+def _ensanchar_para_numeros(hoja: Worksheet) -> None:
+    """
+    Agranda las columnas donde una fecha o un importe no entra: Excel los
+    muestra como #### si la columna es mas angosta (el texto, en cambio, se
+    corta o desborda, asi que no se toca).
+    """
+    necesarios: dict[str, float] = {}
+    for fila in hoja.iter_rows():
+        for celda in fila:
+            valor = celda.value
+            if isinstance(valor, (date, datetime)):
+                largo = ANCHO_FECHA
+            elif isinstance(valor, (int, float)) and not isinstance(valor, bool):
+                largo = len(f"{valor:,.2f}") + MARGEN_IMPORTE
+            elif isinstance(valor, str) and valor.startswith("="):
+                largo = 16  # saldo o total con formula: el mayor importe razonable
+            else:
                 continue
+            letra = celda.column_letter
+            necesarios[letra] = max(necesarios.get(letra, 0), largo)
+    for letra, largo in necesarios.items():
+        dimension = hoja.column_dimensions[letra]
+        if (dimension.width or 0) < largo:
+            dimension.width = largo
+
+
+# ----------------------------------------------------------------------
+# Hoja ARCA
+# ----------------------------------------------------------------------
+
+def _original_arca(r: dict) -> dict:
+    """La fila tal cual vino; si no se tiene, armada con los datos leidos."""
+    if r.get("original"):
+        return r["original"]
+    tipo = {"Retencion": "RETENCION", "Percepcion": "PERCEPCION"}.get(r.get("tipo") or "", "")
+    return dict(zip(COLUMNAS_ARCA, [
+        r.get("cuit"), r.get("razon_social"), None, r.get("impuesto"), None, r.get("regimen"),
+        r.get("fecha"), r.get("certificado"), tipo, r.get("importe"), r.get("comprobante"), None, None, None,
+    ]))
+
+
+def _armar_arca(hoja: Worksheet, arca: list[dict], conciliados: set[str]) -> str | None:
+    """Arma la hoja y devuelve la celda del total ("J55"), o None si no hay importes."""
+    encabezados = _encabezados(arca, COLUMNAS_ARCA)
+    roles = _columnas_por_rol(encabezados)
+    col_importe = roles.get("IMPORTE")
+    col_fecha = roles.get("FECHA")
+
+    _ajustar_anchos(hoja, ANCHOS_ARCA, len(encabezados))
+    _escribir(hoja, 1, encabezados)
+
+    for i, r in enumerate(arca):
+        fila = 2 + i
+        original = _original_arca(r)
+        valores = [original.get(c) for c in encabezados]
+        if col_fecha is not None:
+            valores[col_fecha] = parse_fecha(r.get("fecha")) or valores[col_fecha]
+        if col_importe is not None:
+            valores[col_importe] = r["importe"]
+        _escribir(hoja, fila, valores)
+
+        if col_importe is not None:
+            celda = hoja.cell(row=fila, column=col_importe + 1)
+            celda.number_format = FORMATO_IMPORTE_ARCA
+            if id_arca(i) in conciliados:
+                celda.fill = RELLENO_CONCILIADO
+
+    if col_importe is not None and arca:
+        letra = get_column_letter(col_importe + 1)
+        ultima = 1 + len(arca)
+        total = hoja.cell(row=ultima + FILAS_EN_BLANCO + 1, column=col_importe + 1, value=f"=SUM({letra}2:{letra}{ultima})")
+        total.number_format = FORMATO_IMPORTE_ARCA
+        return total.coordinate
     return None
 
 
-def _importe(valor: object) -> float:
-    try:
-        n = float(valor)
-    except (TypeError, ValueError):
-        return 0.0
-    if n != n or n in (float("inf"), float("-inf")):
-        return 0.0
-    return round(n, 2)
+# ----------------------------------------------------------------------
+# Hoja LIBRO MAYOR
+# ----------------------------------------------------------------------
+
+def _original_mayor(m: dict) -> dict:
+    if m.get("original"):
+        return m["original"]
+    return dict(zip(COLUMNAS_MAYOR, [
+        m.get("fecha"), m.get("documento"), m.get("cuenta"), m.get("importe"), None, None,
+        m.get("descripcion"), m.get("razon_social"),
+    ]))
 
 
-def _escribir_fila(
+class _HojaMayor:
+    """Escribe filas del mayor llevando el saldo corrido con formula."""
+
+    def __init__(self, hoja: Worksheet, encabezados: list[str]):
+        self.hoja = hoja
+        self.encabezados = encabezados
+        roles = _columnas_por_rol(encabezados)
+        self.fecha, self.debe, self.haber, self.saldo = (roles.get(r) for r in ("FECHA", "DEBE", "HABER", "SALDO"))
+        self.fila = 1
+        self.fila_saldo: int | None = None  # la ultima fila con saldo, para encadenar la formula
+
+    def encabezado(self) -> None:
+        _escribir(self.hoja, self.fila, self.encabezados)
+        for col in (self.debe, self.haber, self.saldo):
+            if col is not None:
+                self.hoja.cell(row=self.fila, column=col + 1).number_format = FORMATO_IMPORTE_MAYOR
+        self.fila += 1
+
+    def en_blanco(self, cantidad: int) -> None:
+        self.fila += cantidad
+
+    def titulo(self, texto: str) -> None:
+        """El nombre de un apartado, en negrita en la primera columna."""
+        self.hoja.cell(row=self.fila, column=1, value=texto).font = NEGRITA
+        self.fila += 1
+
+    def control(self, total_arca: str | None) -> int:
+        """
+        Saldo ARCA (el total de la hoja ARCA), saldo Xubio (el saldo corrido
+        despues de los apartados) y la diferencia, todo con formulas.
+        """
+        h = self.hoja
+        if self.saldo is not None:
+            columna = self.saldo + 1
+            saldo_xubio = f"={get_column_letter(columna)}{self.fila_saldo}" if self.fila_saldo else "=0"
+        else:
+            # Sin columna de saldo: Debe menos Haber de todo lo de arriba.
+            columna = self.haber + 1
+            d, e, ultima = get_column_letter(self.debe + 1), get_column_letter(self.haber + 1), self.fila - 1
+            saldo_xubio = f"=SUM({d}2:{d}{ultima})-SUM({e}2:{e}{ultima})"
+        etiqueta = max(columna - 1, 1)
+        valor = get_column_letter(columna)
+        primera = self.fila
+        filas = [
+            ("SALDO ARCA:", f"='ARCA'!{total_arca}" if total_arca else "=0"),
+            ("SALDO XUBIO:", saldo_xubio),
+            ("DIF:", f"={valor}{primera}-{valor}{primera + 1}"),
+        ]
+        for nombre, formula in filas:
+            h.cell(row=self.fila, column=etiqueta, value=nombre).font = NEGRITA
+            celda = h.cell(row=self.fila, column=columna, value=formula)
+            celda.number_format = FORMATO_IMPORTE_MAYOR
+            celda.font = NEGRITA
+            self.fila += 1
+        return columna
+
+    def motivos(self, columna: int, motivos: list[tuple[str, float]]) -> None:
+        """Debajo del control, por que la diferencia no da 0: cada motivo con lo que suma."""
+        h = self.hoja
+        h.cell(row=self.fila - 1, column=columna).font = Font(bold=True, color=ROJO)  # el DIF
+        self.fila += 1
+        h.cell(row=self.fila, column=1, value=TITULO_MOTIVOS).font = Font(bold=True, color=ROJO)
+        self.fila += 1
+        for texto, importe in motivos:
+            h.cell(row=self.fila, column=1, value=texto).font = Font(color=ROJO)
+            celda = h.cell(row=self.fila, column=columna, value=round(importe, 2))
+            celda.number_format = FORMATO_IMPORTE_MAYOR
+            celda.font = Font(color=ROJO)
+            self.fila += 1
+
+    def escribir(self, valores: list, debe: float | None, haber: float | None, saldo_original=None,
+                 conciliado: bool = False) -> tuple[int, float]:
+        """Escribe la fila; devuelve (numero de fila, cuanto suma al saldo Xubio)."""
+        h, f = self.hoja, self.fila
+        aporte = (debe or 0) - (haber or 0)
+        if self.saldo is not None and self.fila_saldo is None and saldo_original is not None:
+            aporte = saldo_original  # la primera fila arranca con el saldo que trae
+        valores = list(valores)
+        if self.debe is not None:
+            valores[self.debe] = debe
+        if self.haber is not None:
+            valores[self.haber] = haber
+        if self.saldo is not None:
+            valores[self.saldo] = None
+        _escribir(h, f, valores, FORMATO_FECHA_MAYOR)
+
+        for col in (self.debe, self.haber):
+            if col is not None:
+                h.cell(row=f, column=col + 1).number_format = FORMATO_IMPORTE_MAYOR
+        if conciliado and self.debe is not None:
+            h.cell(row=f, column=self.debe + 1).fill = RELLENO_CONCILIADO
+
+        if self.saldo is not None and self.debe is not None and self.haber is not None:
+            d, e = get_column_letter(self.debe + 1), get_column_letter(self.haber + 1)
+            s = get_column_letter(self.saldo + 1)
+            if self.fila_saldo is not None:
+                saldo = f"=+{s}{self.fila_saldo}+{d}{f}-{e}{f}"
+            elif saldo_original is not None:
+                saldo = saldo_original  # el saldo con que arranca el mayor
+            else:
+                saldo = f"=+{d}{f}-{e}{f}"
+            celda = h.cell(row=f, column=self.saldo + 1, value=saldo)
+            celda.number_format = FORMATO_IMPORTE_MAYOR
+            self.fila_saldo = f
+        self.fila += 1
+        return f, aporte
+
+
+def _armar_mayor(
     hoja: Worksheet,
-    fila: int,
-    valores: list,
-    columnas_importe: set[int] = frozenset(),
-    fuente: Font | None = None,
-    relleno: PatternFill | None = None,
+    mayor,
+    arca: list[dict],
+    detalle: dict,
+    hasta_periodo: date | None = None,
+    total_arca: str | None = None,
 ) -> None:
-    for i, v in enumerate(valores):
-        celda = hoja.cell(row=fila, column=1 + i, value=v)
-        if i in columnas_importe:
-            celda.number_format = FORMATO_IMPORTE
-            celda.alignment = ALINEACION_DERECHA
-        elif isinstance(v, date):
-            celda.number_format = FORMATO_FECHA
-            celda.alignment = ALINEACION_CENTRO
-        celda.font = fuente or FUENTE_NORMAL
-        if relleno:
-            celda.fill = relleno
+    """Arma la hoja. Si el control no da 0, escribe debajo los motivos (con la DIF en rojo)."""
+    conciliados = {c["id_mayor"] for c in detalle["conciliados"]}
+    redondeos = {c["id_mayor"]: c for c in detalle["conciliados"] if abs(c.get("diferencia_importe") or 0) >= CENTAVO}
+    retenciones = [{**m, "_id": id_mayor(j)} for j, m in enumerate(mayor.retenciones)]
 
+    def del_periodo(m: dict) -> bool:
+        # El bot pide el mayor unos dias de mas para atrapar los cobros cargados
+        # tarde; lo de esos dias que no se concilio es del mes siguiente.
+        fecha = m.get("fecha")
+        return hasta_periodo is None or fecha is None or fecha <= hasta_periodo or m.get("_id") in conciliados
 
-def _escribir_encabezados(hoja: Worksheet, fila: int, columnas: list[str]) -> None:
-    for i, nombre in enumerate(columnas, start=1):
-        celda = hoja.cell(row=fila, column=i, value=nombre)
-        celda.font = FUENTE_ENCABEZADO
-        celda.fill = RELLENO_ENCABEZADO
-        celda.alignment = ALINEACION_CENTRO
+    filas = sorted(
+        [m for m in retenciones if del_periodo(m)]
+        + [{**m, "_tipo": "aplicacion"} for m in mayor.aplicaciones if del_periodo(m)]
+        + [{**m, "_tipo": "inicial"} for m in mayor.saldos_iniciales],
+        key=lambda m: m.get("orden", 0),
+    )
+    encabezados = _encabezados(filas, COLUMNAS_MAYOR)
+    escritor = _HojaMayor(hoja, encabezados)
+    if escritor.debe is None or escritor.haber is None:
+        # Un mayor con una sola columna de importe: se arma con las columnas de Xubio.
+        filas = [{**m, "original": None} for m in filas]
+        encabezados = COLUMNAS_MAYOR
+        escritor = _HojaMayor(hoja, encabezados)
 
+    _ajustar_anchos(hoja, ANCHOS_MAYOR, len(encabezados))
+    escritor.encabezado()
 
-def _logo_escalado(ruta: Path) -> tuple[io.BytesIO, int, int]:
-    """El logo redimensionado (sin deformar) para el recuadro A1:B3."""
-    from PIL import Image as ImagenPIL
+    def valores_de(m: dict) -> tuple[list, dict]:
+        original = _original_mayor(m)
+        valores = [original.get(c) for c in encabezados]
+        if escritor.fecha is not None:
+            valores[escritor.fecha] = parse_fecha(valores[escritor.fecha]) or valores[escritor.fecha]
+        return valores, original
 
-    with ImagenPIL.open(ruta) as imagen:
-        ancho, alto = imagen.size
-        escala = min(ANCHO_LOGO_MAX / ancho, ALTO_LOGO_MAX / alto)
-        nuevo = (max(1, round(ancho * escala)), max(1, round(alto * escala)))
-        buffer = io.BytesIO()
-        imagen.convert("RGBA").resize(nuevo, ImagenPIL.LANCZOS).save(buffer, format="PNG")
-        buffer.seek(0)
-        return buffer, nuevo[0], nuevo[1]
+    aportes: list[float] = []
+    responsables: dict[str, list[float]] = {"redondeos": [], "iniciales": [], "aplicaciones": []}
+    for m in filas:
+        valores, original = valores_de(m)
+        if m.get("original"):
+            debe = _numero(original.get(encabezados[escritor.debe]))
+            haber = _numero(original.get(encabezados[escritor.haber]))
+        else:
+            # Sin la fila original: las retenciones van al Debe y las aplicaciones al Haber.
+            debe, haber = (m.get("importe"), None) if m.get("_id") else (None, m.get("importe"))
+        saldo = _numero(original.get(encabezados[escritor.saldo])) if escritor.saldo is not None else None
+        _, aporte = escritor.escribir(valores, debe, haber, saldo_original=saldo, conciliado=m.get("_id") in conciliados)
+        aportes.append(aporte)
+        # Lo que el saldo Xubio tiene y ARCA nunca informa: el saldo con que arranca
+        # el mayor (el inicial, la apertura) y las aplicaciones del Haber.
+        tipo = m.get("_tipo")
+        de_arrastre = aporte if tipo else aporte - ((debe or 0) - (haber or 0))
+        if tipo == "aplicacion" and abs(aporte) >= CENTAVO:
+            responsables["aplicaciones"].append(aporte)
+        elif abs(de_arrastre) >= CENTAVO:
+            responsables["iniciales"].append(de_arrastre)
+        if m.get("_id") in redondeos:
+            responsables["redondeos"].append(redondeos[m["_id"]]["diferencia_importe"])
 
+    # Lo que informa ARCA y no esta en el mayor: tipo, agente e importe en el Debe.
+    faltan_en_mayor = detalle["faltan_en_mayor"]
+    if faltan_en_mayor:
+        escritor.en_blanco(FILAS_EN_BLANCO)
+        escritor.titulo(TITULO_PENDIENTES)
+        for f in faltan_en_mayor:
+            r = arca[int(f["id"][1:])]  # id_arca(i)
+            valores = [None] * len(encabezados)
+            valores[0] = _tipo_arca(r)
+            if len(valores) > 1:
+                valores[1] = r.get("razon_social")
+            aportes.append(escritor.escribir(valores, f["importe"], 0)[1])
 
-def _insertar_logo(hoja: Worksheet) -> None:
-    """Si falta el logo el papel sale igual, sin imagen."""
-    ruta = Path(settings.LOGO_EMPRESA)
-    if not ruta.exists():
-        logger.warning("No se encontro el logo de la empresa en %s", ruta)
+    # Lo que esta en el mayor y ARCA no informa: el mismo asiento, con el importe en el Haber.
+    faltan_en_arca = detalle["faltan_en_arca"]
+    if faltan_en_arca:
+        escritor.en_blanco(FILAS_EN_BLANCO)
+        escritor.titulo(TITULO_CONTABILIZADAS)
+        por_id = {m["_id"]: m for m in filas if m.get("_id")}
+        for f in faltan_en_arca:
+            m = por_id.get(f["id"], f)
+            valores, _ = valores_de(m)
+            aportes.append(escritor.escribir(valores, None, f["importe"])[1])
+
+    # El control: con los dos apartados, el mayor tiene que dar lo que informa ARCA.
+    escritor.en_blanco(FILAS_EN_BLANCO)
+    columna = escritor.control(total_arca)
+
+    importe_arca = sum(r["importe"] for r in arca) if total_arca else 0
+    diferencia = round(importe_arca - sum(aportes), 2)
+    if abs(diferencia) < CENTAVO:
         return
-    try:
-        buffer, ancho, alto = _logo_escalado(ruta)
-    except Exception:
-        logger.exception("No se pudo preparar el logo %s", ruta)
-        return
 
-    imagen = ImagenExcel(buffer)
-    imagen.width, imagen.height = ancho, alto
-    imagen.anchor = OneCellAnchor(
-        _from=AnchorMarker(col=0, colOff=pixels_to_EMU(6), row=0, rowOff=pixels_to_EMU(8)),
-        ext=XDRPositiveSize2D(cx=pixels_to_EMU(ancho), cy=pixels_to_EMU(alto)),
-    )
-    hoja.add_image(imagen)
+    # Por que no da 0. Cada motivo suma (o resta) a la diferencia ARCA − Xubio.
+    def total(clave: str) -> float:
+        return sum(responsables[clave])
 
+    if abs(total("iniciales") + total("aplicaciones")) < CENTAVO:
+        # La apertura y la aplicacion del Haber se compensan: no son responsables.
+        responsables["iniciales"], responsables["aplicaciones"] = [], []
 
-def _escribir_membrete(hoja: Worksheet, titulo: str, empresa: str, generado: date) -> None:
-    _insertar_logo(hoja)
-    hoja.cell(row=FILA_TITULO, column=3, value=titulo).font = FUENTE_TITULO
-    hoja.cell(row=5, column=1, value="Empresa:").font = FUENTE_NEGRITA
-    hoja.cell(row=5, column=2, value=empresa or "")
-    hoja.cell(row=6, column=1, value="Generado:").font = FUENTE_NEGRITA
-    celda = hoja.cell(row=6, column=2, value=generado)
-    celda.number_format = FORMATO_FECHA
-    celda.alignment = Alignment(horizontal="left")
-
-
-def _ajustar_anchos(hoja: Worksheet, anchos: list[float]) -> None:
-    for i, ancho in enumerate(anchos, start=1):
-        hoja.column_dimensions[get_column_letter(i)].width = ancho
-
-
-# ----------------------------------------------------------------------
-# Hojas de detalle
-# ----------------------------------------------------------------------
-
-def _armar_tabla(
-    hoja: Worksheet,
-    columnas: list[str],
-    anchos: list[float],
-    filas: list[list],
-    columna_importe: int,
-    relleno: PatternFill | None = None,
-) -> None:
-    """Encabezado con filtro, filas y total con formula SUM bajo el importe."""
-    _ajustar_anchos(hoja, anchos)
-    _escribir_encabezados(hoja, FILA_ENCABEZADO, columnas)
-    hoja.freeze_panes = hoja.cell(row=FILA_PRIMER_DATO, column=1)
-
-    for k, valores in enumerate(filas):
-        _escribir_fila(hoja, FILA_PRIMER_DATO + k, valores, {columna_importe}, relleno=relleno)
-
-    ultima = FILA_PRIMER_DATO + len(filas) - 1
-    hoja.auto_filter.ref = (
-        f"A{FILA_ENCABEZADO}:{get_column_letter(len(columnas))}{max(ultima, FILA_ENCABEZADO)}"
-    )
-
-    fila_total = ultima + 1 if filas else FILA_PRIMER_DATO
-    letra = get_column_letter(columna_importe + 1)
-    hoja.cell(row=fila_total, column=1, value="TOTAL").font = FUENTE_NEGRITA
-    total = hoja.cell(
-        row=fila_total,
-        column=columna_importe + 1,
-        value=f"=SUM({letra}{FILA_PRIMER_DATO}:{letra}{ultima})" if filas else 0,
-    )
-    total.number_format = FORMATO_IMPORTE
-    total.font = FUENTE_NEGRITA
-    total.border = BORDE_DOBLE
-
-
-def _armar_conciliados(hoja: Worksheet, filas: list[dict]) -> None:
-    _armar_tabla(
-        hoja,
-        ["Fecha ARCA", "CUIT agente", "Razón social", "Impuesto", "Certificado",
-         "Importe", "Fecha mayor", "Días", "Documento", "Dif. importe", "Criterio", "Estado"],
-        [12, 16, 34, 16, 18, 16, 12, 8, 22, 14, 24, 16],
-        [
-            [_fecha(f["fecha"]), f["cuit"], f["razon_social"], f["impuesto"], f.get("certificado"),
-             _importe(f["importe"]), _fecha(f.get("fecha_mayor")), f.get("diferencia_dias"),
-             f.get("documento_mayor"), _importe(f.get("diferencia_importe")),
-             ETIQUETAS_CRITERIO.get(f.get("criterio"), f.get("criterio")), ESTADO_CONCILIADO]
-            for f in filas
-        ],
-        columna_importe=5,
-        relleno=RELLENO_CONCILIADO,
-    )
-
-
-def _armar_faltan_en_arca(hoja: Worksheet, filas: list[dict]) -> None:
-    _armar_tabla(
-        hoja,
-        ["Fecha", "CUIT", "Organización", "Impuesto", "Cuenta", "Documento",
-         "Descripción", "Importe", "Estado", "Nota"],
-        [12, 16, 34, 16, 32, 22, 40, 16, 18, 60],
-        [
-            [_fecha(f["fecha"]), f["cuit"], f["razon_social"], f["impuesto"], f.get("cuenta"),
-             f.get("documento"), f.get("descripcion"), _importe(f["importe"]), ESTADO_SIN_COINCIDENCIA,
-             f.get("nota")]
-            for f in filas
-        ],
-        columna_importe=7,
-    )
-
-
-def _armar_faltan_en_mayor(hoja: Worksheet, filas: list[dict]) -> None:
-    _armar_tabla(
-        hoja,
-        ["Fecha", "CUIT agente", "Razón social", "Impuesto", "Tipo", "Régimen", "Certificado",
-         "Comprobante", "Importe", "Estado", "Nota"],
-        [12, 16, 34, 16, 12, 28, 18, 20, 16, 18, 60],
-        [
-            [_fecha(f["fecha"]), f["cuit"], f["razon_social"], f["impuesto"],
-             {"Retencion": "Retención", "Percepcion": "Percepción"}.get(f.get("tipo") or "", ""),
-             f.get("regimen"), f.get("certificado"), f.get("comprobante"), _importe(f["importe"]),
-             ESTADO_SIN_COINCIDENCIA, f.get("nota")]
-            for f in filas
-        ],
-        columna_importe=8,
-    )
-
-
-# ----------------------------------------------------------------------
-# Resumen
-# ----------------------------------------------------------------------
-
-def _armar_resumen(hoja: Worksheet, resultado: dict) -> None:
-    _ajustar_anchos(hoja, [22, 14, 20, 20, 20])
-    detalle = resultado["detalle"]
-
-    # Si los dos archivos no son del mismo mes o impuesto, que se vea antes que los numeros.
-    for k, aviso in enumerate(resultado.get("avisos") or []):
-        celda = hoja.cell(row=FILA_TITULO + 1 + k, column=3, value=f"⚠ {aviso}")
-        celda.font = Font(name="Calibri", size=10, bold=True, color="FF9C5700")
-    _escribir_encabezados(hoja, FILA_ENCABEZADO, ["Categoría", "Cantidad", "Importe"])
-    bandejas = [
-        ("A · Conciliados", "conciliados", "Conciliados"),
-        ("B · Faltan en ARCA", "faltan_en_arca", "Faltan_en_ARCA"),
-        ("C · Faltan en el Mayor", "faltan_en_mayor", "Faltan_en_Mayor"),
+    motivos = [
+        (f"Conciliadas con importe distinto entre ARCA y el asiento: {len(responsables['redondeos'])} (redondeos al cargar)",
+         total("redondeos")),
+        ("Saldo inicial / asiento de apertura del mayor: ARCA no lo informa", -total("iniciales")),
+        (f"Aplicaciones del Haber (DDJJ, anulaciones): {len(responsables['aplicaciones'])}, ARCA no las informa",
+         -total("aplicaciones")),
     ]
-    for k, (etiqueta, clave, hoja_ref) in enumerate(bandejas):
-        fila = FILA_PRIMER_DATO + k
-        filas_bandeja = detalle[clave]
-        _escribir_fila(
-            hoja, fila,
-            [etiqueta, len(filas_bandeja), sum(_importe(f["importe"]) for f in filas_bandeja)],
-            {2},
-            relleno=RELLENO_CONCILIADO if clave == "conciliados" else None,
-        )
-        hoja.cell(row=fila, column=1).hyperlink = f"#{hoja_ref}!A1"
-
-    # Control contra la DDJJ: lo que informa ARCA, lo registrado y la diferencia.
-    resumen = resultado.get("resumen", {})
-    fila_control = FILA_PRIMER_DATO + len(bandejas) + 1
-    for k, (etiqueta, clave) in enumerate(
-        [("Informado en ARCA", "importe_arca"), ("Registrado en el Libro Mayor de Xubio", "importe_mayor"), ("Diferencia", "diferencia")]
-    ):
-        _escribir_fila(
-            hoja, fila_control + k, [etiqueta, None, _importe(resumen.get(clave))], {2},
-            fuente=FUENTE_NEGRITA if clave == "diferencia" else None,
-        )
-
-    # Por impuesto: donde se concentran las diferencias.
-    fila_imp = fila_control + 5
-    hoja.cell(row=fila_imp - 1, column=1, value="Por impuesto").font = FUENTE_NEGRITA
-    _escribir_encabezados(
-        hoja, fila_imp,
-        ["Impuesto", "Cantidad", "ARCA", "Libro Mayor", "Diferencia", "Conciliado", "Faltan en ARCA", "Faltan en el Mayor"],
-    )
-    _ajustar_anchos(hoja, [22, 14, 18, 18, 18, 18, 18, 18])
-    for k, f in enumerate(resultado.get("por_impuesto") or _por_impuesto_desde_detalle(detalle)):
-        _escribir_fila(
-            hoja, fila_imp + 1 + k,
-            [f["impuesto"], f["cantidad_arca"], f["importe_arca"], f["importe_mayor"], f["diferencia"],
-             f["conciliado"], f["faltan_en_arca"], f["faltan_en_mayor"]],
-            {2, 3, 4, 5, 6, 7},
-        )
-    fila = fila_imp + 2 + len(resultado.get("por_impuesto") or _por_impuesto_desde_detalle(detalle))
-
-    # Los primeros casos de B y C: lo que hay que reclamar o ajustar.
-    for titulo, filas, columnas, valores in (
-        (f"B · Faltan en ARCA (primeros {CASOS_EN_RESUMEN})", detalle["faltan_en_arca"],
-         ["Fecha", "CUIT", "Organización", "Impuesto", "Documento", "Importe"],
-         lambda f: [_fecha(f["fecha"]), f["cuit"], f["razon_social"], f["impuesto"], f.get("documento"),
-                    _importe(f["importe"])]),
-        (f"C · Faltan en el Mayor (primeros {CASOS_EN_RESUMEN})", detalle["faltan_en_mayor"],
-         ["Fecha", "CUIT agente", "Razón social", "Impuesto", "Certificado", "Importe"],
-         lambda f: [_fecha(f["fecha"]), f["cuit"], f["razon_social"], f["impuesto"], f.get("certificado"),
-                    _importe(f["importe"])]),
-    ):
-        fila += 1
-        hoja.cell(row=fila, column=1, value=titulo).font = FUENTE_NEGRITA
-        _escribir_encabezados(hoja, fila + 1, columnas)
-        fila += 2
-        if not filas:
-            hoja.cell(row=fila, column=1, value="Sin casos.")
-            fila += 1
-        for f in filas[:CASOS_EN_RESUMEN]:
-            _escribir_fila(hoja, fila, valores(f), {5})
-            fila += 1
+    motivos = [(texto, importe) for texto, importe in motivos if abs(importe) >= CENTAVO]
+    otras = diferencia - sum(importe for _, importe in motivos)
+    if abs(otras) >= CENTAVO:
+        motivos.append(("Otras diferencias (filas cambiadas a mano o con importes que no se pudieron leer)", otras))
+    escritor.motivos(columna, motivos)
 
 
-def _por_impuesto_desde_detalle(detalle: dict) -> list[dict]:
-    """Para resultados sin `por_impuesto` (los arma el conciliador): mismos totales desde el detalle."""
-    filas: dict[str, dict] = defaultdict(
-        lambda: {"cantidad_arca": 0, "importe_arca": 0.0, "importe_mayor": 0.0,
-                 "conciliado": 0.0, "faltan_en_arca": 0.0, "faltan_en_mayor": 0.0}
-    )
-    for f in detalle["conciliados"]:
-        d = filas[f.get("impuesto") or "Sin identificar"]
-        d["cantidad_arca"] += 1
-        d["importe_arca"] += _importe(f["importe"])
-        d["importe_mayor"] += _importe(f.get("importe_mayor", f["importe"]))
-        d["conciliado"] += _importe(f["importe"])
-    for f in detalle["faltan_en_arca"]:
-        d = filas[f.get("impuesto") or "Sin identificar"]
-        d["importe_mayor"] += _importe(f["importe"])
-        d["faltan_en_arca"] += _importe(f["importe"])
-    for f in detalle["faltan_en_mayor"]:
-        d = filas[f.get("impuesto") or "Sin identificar"]
-        d["cantidad_arca"] += 1
-        d["importe_arca"] += _importe(f["importe"])
-        d["faltan_en_mayor"] += _importe(f["importe"])
-    return [
-        {"impuesto": k, **v, "diferencia": round(v["importe_arca"] - v["importe_mayor"], 2)}
-        for k, v in sorted(filas.items())
-    ]
-
-
-def _armar_para_revisar(hoja: Worksheet, sugerencias: list[dict]) -> None:
-    """Pares que el cruce no hizo solo pero que probablemente sean la misma retención."""
-    _armar_tabla(
-        hoja,
-        ["Fecha ARCA", "CUIT agente", "Razón social", "Impuesto ARCA", "Certificado", "Importe ARCA",
-         "Fecha mayor", "Documento", "Importe mayor", "Motivo"],
-        [12, 16, 34, 16, 18, 16, 12, 22, 16, 60],
-        [
-            [_fecha(s["arca"]["fecha"]), s["arca"]["cuit"], s["arca"]["razon_social"], s["arca"]["impuesto"],
-             s["arca"].get("certificado"), _importe(s["arca"]["importe"]), _fecha(s["mayor"]["fecha"]),
-             s["mayor"].get("documento"), _importe(s["mayor"]["importe"]), s["motivo"]]
-            for s in sugerencias
-        ],
-        columna_importe=5,
-    )
+def _tipo_arca(r: dict) -> str:
+    """'RETENCION' o 'PERCEPCION', como lo escribe ARCA en «Descripción Operación»."""
+    original = r.get("original") or {}
+    for nombre, valor in original.items():
+        if _traducir_columna(nombre)[0] == "DETALLE" and valor:
+            return str(valor).strip()
+    return {"Retencion": "RETENCION", "Percepcion": "PERCEPCION"}.get(r.get("tipo") or "", "RETENCION")
 
 
 # ----------------------------------------------------------------------
 # Entrada
 # ----------------------------------------------------------------------
 
-def exportar(resultado: dict, empresa: str | None = None, hoy: date | None = None) -> bytes:
-    """El .xlsx con el resultado del cruce (el mismo dict que va al front)."""
-    dia = hoy or date.today()
-    empresa = empresa or settings.EMPRESA
+def exportar(resultado: dict, entrada) -> bytes:
+    """
+    El .xlsx con el resultado del cruce. `entrada` es lo leido de cada lado
+    (tareas.Entrada): las filas originales de ARCA y del mayor, en el orden
+    del archivo, para copiar las dos planillas iguales.
+    """
     detalle = resultado["detalle"]
+    conciliados_arca = {c["id"] for c in detalle["conciliados"]}
 
     libro = Workbook()
-    hojas = [
-        ("Resumen", "Conciliación de Retenciones ARCA", lambda h: _armar_resumen(h, resultado)),
-        ("Conciliados", "A · Retenciones conciliadas", lambda h: _armar_conciliados(h, detalle["conciliados"])),
-        ("Faltan_en_ARCA", "B · Registradas en el Libro Mayor de Xubio que no figuran en ARCA",
-         lambda h: _armar_faltan_en_arca(h, detalle["faltan_en_arca"])),
-        ("Faltan_en_Mayor", "C · Declaradas en ARCA sin registrar en el Libro Mayor de Xubio",
-         lambda h: _armar_faltan_en_mayor(h, detalle["faltan_en_mayor"])),
-    ]
-    if resultado.get("sugerencias"):
-        hojas.append(
-            ("Para revisar", "Posibles pares para confirmar a mano",
-             lambda h: _armar_para_revisar(h, resultado["sugerencias"]))
-        )
-    for k, (nombre, titulo, armar) in enumerate(hojas):
-        hoja = libro.active if k == 0 else libro.create_sheet()
-        hoja.title = nombre
-        _escribir_membrete(hoja, titulo, empresa, dia)
-        armar(hoja)
+    hoja_arca = libro.active
+    hoja_arca.title = "ARCA"
+    total_arca = _armar_arca(hoja_arca, entrada.arca, conciliados_arca)
+
+    hoja_mayor = libro.create_sheet("LIBRO MAYOR")
+    _armar_mayor(hoja_mayor, entrada.mayor, entrada.arca, detalle, getattr(entrada, "hasta_periodo", None), total_arca)
+    for hoja in (hoja_arca, hoja_mayor):
+        _ensanchar_para_numeros(hoja)
 
     destino = io.BytesIO()
     libro.save(destino)
