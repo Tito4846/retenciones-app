@@ -19,6 +19,7 @@ import {
 } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import {
+  CambiosMovimientos,
   ArchivoExportado,
   ConciliacionEstado,
   ConciliacionResultado,
@@ -146,6 +147,11 @@ export class ConciliacionService {
   /** Deshace un par hecho a mano. */
   desemparejar(taskId: string, arcaId: string): Observable<ConciliacionResultado> {
     return this.http.delete<ConciliacionResultado>(`${this.apiUrl}/conciliacion/${taskId}/pares/${arcaId}`);
+  }
+
+  /** Guarda lo corregido y lo agregado a mano; devuelve el cruce rehecho. */
+  guardarMovimientos(taskId: string, cambios: CambiosMovimientos): Observable<ConciliacionResultado> {
+    return this.http.post<ConciliacionResultado>(`${this.apiUrl}/conciliacion/${taskId}/movimientos`, cambios);
   }
 
   /** Pide el papel de trabajo .xlsx de una conciliación terminada. */

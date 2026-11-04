@@ -19,7 +19,8 @@ from datetime import date
 from app.services.conciliador import conciliar_retenciones
 from app.services.importador_arca import leer_arca
 from app.services.importador_mayor import LecturaMayor, leer_mayor
-from app.services.tools import ErrorDeLectura, OperacionCancelada
+from app.services.importador_tablas import columna_canonica
+from app.services.tools import ErrorDeLectura, OperacionCancelada, normalizar_cuit, parse_fecha
 
 logger = logging.getLogger(__name__)
 
@@ -217,6 +218,113 @@ def desemparejar(task_id: str, arca_id: str) -> dict:
             raise ErrorDeEmparejado("Ese par no se hizo a mano: no se puede deshacer.")
         manuales = {k: v for k, v in tarea.manuales.items() if k != i}
         tarea.resultado = _cruzar(tarea.entrada, manuales)
+        tarea.manuales = manuales
+        return tarea.resultado
+
+
+# Campo de la pantalla -> columna canonica de la planilla original (para el Excel).
+_COLUMNAS_ARCA = {"fecha": "FECHA", "razon_social": "RAZON_SOCIAL", "cuit": "CUIT", "certificado": "CERTIFICADO", "importe": "IMPORTE"}
+_COLUMNAS_MAYOR = {"fecha": "FECHA", "razon_social": "RAZON_SOCIAL", "documento": "DOCUMENTO", "importe": "DEBE"}
+
+
+def _aplicar(registro: dict, campos: dict, columnas: dict[str, str]) -> None:
+    """Pisa los datos leidos y la fila original (la que copia el Excel) con lo editado."""
+    for campo, valor in campos.items():
+        if campo not in columnas:
+            continue
+        if campo == "fecha":
+            valor = parse_fecha(valor)
+            if valor is None:
+                raise ErrorDeEmparejado("Hay una fecha que no es válida.")
+        elif campo == "importe":
+            valor = round(float(valor), 2)
+            if valor <= 0:
+                raise ErrorDeEmparejado("El importe tiene que ser mayor a 0.")
+        elif campo == "cuit":
+            valor = normalizar_cuit(valor)
+        else:
+            valor = (str(valor).strip() or None) if valor is not None else None
+        registro[campo] = valor if valor is not None or campo != "razon_social" else ""
+        original = registro.get("original")
+        if original:
+            for encabezado in original:
+                if columna_canonica(encabezado) == columnas[campo]:
+                    original[encabezado] = valor
+                    break
+
+
+def _fila_vacia(filas: list[dict]) -> dict | None:
+    """Una fila original con los mismos encabezados y sin valores, para un movimiento nuevo."""
+    modelo = next((f["original"] for f in filas if f.get("original")), None)
+    return dict.fromkeys(modelo) if modelo else None
+
+
+def guardar_cambios(task_id: str, cambios: dict[str, dict], nuevos: list[dict], eliminados: list[str] = ()) -> dict:
+    """
+    Aplica lo corregido a mano en la pantalla (por id de movimiento) y los
+    movimientos agregados y quitados, y rehace el cruce: el resumen, el detalle
+    y el Excel salen ya con los cambios. Si se quita algo, los ids de lo que
+    sigue se corren (el resultado nuevo ya viene con los ids nuevos).
+    """
+    with _lock:
+        tarea = _tareas.get(task_id)
+        if tarea is None or tarea.status != "completado" or tarea.entrada is None:
+            raise KeyError(task_id)
+        entrada = tarea.entrada
+        # Se trabaja sobre copias: si algo falla, la conciliacion queda como estaba.
+        arca = [{**r, "original": dict(r["original"]) if r.get("original") else None} for r in entrada.arca]
+        retenciones = [{**m, "original": dict(m["original"]) if m.get("original") else None} for m in entrada.mayor.retenciones]
+
+        for identificador, campos in cambios.items():
+            if identificador.startswith("a"):
+                _aplicar(arca[_indice(identificador, "a", len(arca))], campos, _COLUMNAS_ARCA)
+            else:
+                _aplicar(retenciones[_indice(identificador, "m", len(retenciones))], campos, _COLUMNAS_MAYOR)
+
+        for nuevo in nuevos:
+            impuesto = (nuevo.get("impuesto") or "").strip()
+            tipo = nuevo.get("tipo") if nuevo.get("tipo") in ("Retencion", "Percepcion") else "Retencion"
+            if nuevo.get("lado") == "arca":
+                registro = {"impuesto": impuesto, "tipo": tipo, "regimen": None, "comprobante": None,
+                            "original": _fila_vacia(arca)}
+                campos = {k: nuevo.get(k) for k in ("fecha", "razon_social", "cuit", "importe")}
+                campos["certificado"] = nuevo.get("comprobante")
+                _aplicar(registro, campos, _COLUMNAS_ARCA)
+                arca.append(registro)
+            else:
+                # La cuenta de un asiento del mismo impuesto y tipo, o una con ese nombre.
+                cuenta = next(
+                    (m["cuenta"] for m in retenciones if m.get("impuesto") == impuesto and m.get("tipo") == tipo and m.get("cuenta")),
+                    f"{'Percepciones' if tipo == 'Percepcion' else 'Retenciones'} {impuesto} sufridas".replace("  ", " "),
+                )
+                orden = max((m.get("orden", 0) for m in [*retenciones, *entrada.mayor.aplicaciones]), default=0) + 1
+                registro = {"orden": orden, "cuenta": cuenta, "descripcion": "Agregado a mano", "cuit": None,
+                            "impuesto": impuesto, "tipo": tipo, "original": _fila_vacia(retenciones)}
+                if registro["original"] is not None:
+                    for encabezado in registro["original"]:
+                        canonica = columna_canonica(encabezado)
+                        if canonica == "CUENTA":
+                            registro["original"][encabezado] = cuenta
+                        elif canonica == "DETALLE":
+                            registro["original"][encabezado] = "Agregado a mano"
+                campos = {k: nuevo.get(k) for k in ("fecha", "razon_social", "importe")}
+                campos["documento"] = nuevo.get("comprobante")
+                _aplicar(registro, campos, _COLUMNAS_MAYOR)
+                retenciones.append(registro)
+
+        # Quitar: los pares hechos a mano se reacomodan a los indices nuevos, y
+        # los que usaban un movimiento quitado se pierden.
+        quitar_arca = {_indice(i, "a", len(entrada.arca)) for i in eliminados if i.startswith("a")}
+        quitar_mayor = {_indice(i, "m", len(entrada.mayor.retenciones)) for i in eliminados if i.startswith("m")}
+        nuevo_arca = {v: n for n, v in enumerate(i for i in range(len(arca)) if i not in quitar_arca)}
+        nuevo_mayor = {v: n for n, v in enumerate(j for j in range(len(retenciones)) if j not in quitar_mayor)}
+        arca = [r for i, r in enumerate(arca) if i in nuevo_arca]
+        retenciones = [m for j, m in enumerate(retenciones) if j in nuevo_mayor]
+        manuales = {nuevo_arca[i]: nuevo_mayor[j] for i, j in tarea.manuales.items() if i in nuevo_arca and j in nuevo_mayor}
+
+        nueva = Entrada(arca, entrada.mayor._replace(retenciones=retenciones), entrada.hasta_periodo)
+        tarea.resultado = _cruzar(nueva, manuales)
+        tarea.entrada = nueva
         tarea.manuales = manuales
         return tarea.resultado
 

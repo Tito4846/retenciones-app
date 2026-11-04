@@ -2,14 +2,15 @@ import logging
 import os
 import shutil
 import tempfile
+from typing import Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
 from app.core.config import settings
-from app.services import exportador, tareas
+from app.services import exportador, revisiones, tareas
 from app.services.importador_tablas import EXTENSIONES
 
 logger = logging.getLogger(__name__)
@@ -109,6 +110,37 @@ def desemparejar(task_id: str, arca_id: str) -> dict:
     return {"status": "completado", **resultado}
 
 
+class MovimientoNuevo(BaseModel):
+    lado: Literal["arca", "mayor"]
+    fecha: str
+    razon_social: str = ""
+    cuit: str | None = None
+    impuesto: str = ""
+    tipo: str = "Retencion"
+    comprobante: str | None = None
+    importe: float
+
+
+class Cambios(BaseModel):
+    # {id de movimiento: {campo: valor}}
+    cambios: dict[str, dict[str, str | float | None]] = {}
+    nuevos: list[MovimientoNuevo] = []
+    # Ids de los movimientos a quitar.
+    eliminados: list[str] = []
+
+
+@router.post("/conciliacion/{task_id}/movimientos")
+def guardar_movimientos(task_id: str, datos: Cambios) -> dict:
+    """Guarda lo corregido, agregado y quitado a mano en la pantalla y rehace el cruce."""
+    try:
+        resultado = tareas.guardar_cambios(task_id, datos.cambios, [n.model_dump() for n in datos.nuevos], datos.eliminados)
+    except KeyError:
+        raise HTTPException(404, "La conciliación no existe o ya venció. Volvé a traer los datos.") from None
+    except tareas.ErrorDeEmparejado as e:
+        raise HTTPException(422, str(e)) from e
+    return {"status": "completado", **resultado}
+
+
 @router.get("/exportar/{task_id}")
 def exportar(task_id: str, empresa: str | None = None) -> Response:
     """El papel de trabajo .xlsx de una conciliacion ya terminada."""
@@ -121,3 +153,95 @@ def exportar(task_id: str, empresa: str | None = None) -> Response:
     # filename*=UTF-8'' para que los acentos lleguen bien al navegador.
     disposicion = f"attachment; filename=\"retenciones.xlsx\"; filename*=UTF-8''{quote(nombre)}"
     return Response(contenido, media_type=TIPO_XLSX, headers={"Content-Disposition": disposicion})
+
+
+# ----------------------------------------------------------------------
+# Bandeja de revisión
+# ----------------------------------------------------------------------
+
+
+class Envio(BaseModel):
+    empresa: str = ""
+    periodo: str = ""
+    enviado_por: str = ""
+    comentario: str = ""
+
+
+class CambioEstado(BaseModel):
+    estado: str
+    autor: str = ""
+    comentario: str = ""
+
+
+class Control(BaseModel):
+    ok: bool
+    autor: str = ""
+
+
+class Observacion(BaseModel):
+    texto: str
+    origen: str = "nuestro"
+    autor: str = ""
+
+
+class Resolucion(BaseModel):
+    resuelta: bool = True
+    autor: str = ""
+
+
+def _revision(funcion, *args) -> dict:
+    try:
+        return funcion(*args)
+    except KeyError:
+        raise HTTPException(404, "La revisión no existe.") from None
+    except revisiones.ErrorDeRevision as e:
+        raise HTTPException(409, str(e)) from e
+
+
+@router.post("/revisiones/{task_id}", status_code=201)
+def enviar_a_revision(task_id: str, envio: Envio) -> dict:
+    """Genera el papel de trabajo de la conciliación y lo deja en la bandeja de revisión."""
+    tarea = tareas.obtener(task_id)
+    if tarea is None or tarea.status != "completado":
+        raise HTTPException(404, "No hay una conciliación terminada para enviar.")
+    contenido = exportador.exportar(tarea.resultado, tarea.entrada)
+    return revisiones.crear(contenido, exportador.nombre_archivo(envio.empresa or None), tarea.resultado,
+                            envio.empresa, envio.periodo, envio.enviado_por, envio.comentario)
+
+
+@router.get("/revisiones")
+def listar_revisiones() -> dict:
+    return {"revisiones": revisiones.listar(), "controles": revisiones.CONTROLES}
+
+
+@router.get("/revisiones/{revision_id}/excel")
+def excel_revision(revision_id: str) -> FileResponse:
+    revision = revisiones.obtener(revision_id)
+    if revision is None or not revisiones.ruta_excel(revision_id).exists():
+        raise HTTPException(404, "La revisión no existe.")
+    return FileResponse(revisiones.ruta_excel(revision_id), media_type=TIPO_XLSX, filename=revision["archivo"])
+
+
+@router.post("/revisiones/{revision_id}/estado")
+def estado_revision(revision_id: str, cambio: CambioEstado) -> dict:
+    return _revision(revisiones.cambiar_estado, revision_id, cambio.estado, cambio.autor, cambio.comentario)
+
+
+@router.post("/revisiones/{revision_id}/controles/{control}")
+def control_revision(revision_id: str, control: str, datos: Control) -> dict:
+    return _revision(revisiones.marcar_control, revision_id, control, datos.ok, datos.autor)
+
+
+@router.post("/revisiones/{revision_id}/observaciones")
+def observar_revision(revision_id: str, datos: Observacion) -> dict:
+    return _revision(revisiones.observar, revision_id, datos.texto, datos.origen, datos.autor)
+
+
+@router.post("/revisiones/{revision_id}/observaciones/{observacion_id}")
+def resolver_revision(revision_id: str, observacion_id: str, datos: Resolucion) -> dict:
+    return _revision(revisiones.resolver_observacion, revision_id, observacion_id, datos.resuelta, datos.autor)
+
+
+@router.delete("/revisiones/{revision_id}", status_code=204)
+def eliminar_revision(revision_id: str) -> None:
+    _revision(revisiones.eliminar, revision_id)

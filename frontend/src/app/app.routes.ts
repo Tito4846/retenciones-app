@@ -12,6 +12,10 @@ export const routes: Routes = [
       import('./features/conciliacion/conciliacion').then((m) => m.Conciliacion),
   },
   {
+    path: 'revision',
+    loadComponent: () => import('./features/revision/revision').then((m) => m.RevisionPantalla),
+  },
+  {
     path: 'conexiones',
     loadComponent: () => import('./features/conexiones/conexiones').then((m) => m.Conexiones),
   },

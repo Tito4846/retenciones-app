@@ -39,8 +39,26 @@
       </svg>
       {{ store.exportando() ? 'Generando Excel…' : 'Exportar papel de trabajo' }}
     </button>
+    <button
+      type="button"
+      (click)="abrirEnvio()"
+      [disabled]="!store.puedeExportar()"
+      title="Guarda el Excel en la bandeja de Revisión para que alguien lo verifique"
+      class="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13" /><path d="M22 2 15 22l-4-9-9-4z" /></svg>
+      Enviar a revisión
+    </button>
   </div>
 </header>
+
+@if (enviada(); as e) {
+  <p class="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-800">
+    Enviado a revisión: <strong>{{ e.empresa }}</strong> quedó como «Falta revisión».
+    <a routerLink="/revision" class="font-semibold underline">Ir a Revisión</a>
+    <button type="button" (click)="enviada.set(null)" class="ml-auto text-emerald-700/70 hover:text-emerald-900" aria-label="Cerrar">✕</button>
+  </p>
+}
 
 @if (store.errorExportacion(); as mensaje) {
   <p class="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{{ mensaje }}</p>
@@ -185,54 +203,111 @@
   <!-- Primeros casos de B y C -->
   <div class="mb-6 grid gap-4 xl:grid-cols-2">
     @for (bloque of primerosCasos(); track bloque.config.id) {
-      <section class="overflow-hidden rounded-2xl border border-line bg-white">
+      @let avisable = bloque.config.id === 'faltan_en_arca';
+      <section class="flex flex-col overflow-hidden rounded-2xl border border-line bg-white">
         <div class="flex items-start justify-between gap-3 px-5 pt-4 pb-3">
-          <div>
-            <h2 class="font-semibold">{{ bloque.config.letra }} · {{ bloque.config.titulo }}</h2>
-            <p class="text-xs text-muted">
-              @if (bloque.total > casosEnResumen) {
-                Primeros {{ casosEnResumen }} de {{ bloque.total }} ·
-              }
-              {{ bloque.config.accion }}
-            </p>
+          <div class="min-w-0">
+            <h2 class="flex items-center gap-2 font-semibold">
+              <span
+                class="flex h-6 w-6 items-center justify-center rounded-md text-xs font-bold"
+                [class]="bloque.config.tono === 'ambar' ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-700'"
+              >{{ bloque.config.letra }}</span>
+              {{ bloque.config.titulo }}
+              <span class="text-sm font-normal text-muted">({{ bloque.total }})</span>
+            </h2>
+            <p class="mt-1 text-xs text-muted">{{ bloque.config.accion }}</p>
           </div>
           @if (bloque.total) {
             <button type="button" (click)="elegirPestana(bloque.config.id)" class="shrink-0 rounded-md px-2 py-1 text-xs font-semibold text-brand-700 hover:bg-brand-50">
-              Ver todos
+              Ver detalle →
             </button>
           }
         </div>
+
         @if (bloque.filas.length) {
-          <div class="overflow-x-auto">
-            <table class="min-w-full text-sm whitespace-nowrap">
-              <thead class="border-y border-line bg-canvas/60 text-left text-xs tracking-wider text-muted uppercase">
-                <tr>
-                  <th class="px-5 py-2 font-semibold">Fecha</th>
-                  <th class="px-3 py-2 font-semibold">{{ bloque.config.id === 'faltan_en_arca' ? 'Organización' : 'Agente' }}</th>
-                  <th class="px-3 py-2 font-semibold">{{ bloque.config.id === 'faltan_en_arca' ? 'Documento' : 'Certificado' }}</th>
-                  <th class="px-5 py-2 text-right font-semibold">Importe</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-line">
-                @for (f of bloque.filas; track f.id ?? $index) {
-                  <tr>
-                    <td class="px-5 py-2 tabular-nums">{{ f.fecha | date: 'dd/MM/yyyy' }}</td>
-                    <td class="max-w-56 truncate px-3 py-2">
-                      {{ f.razon_social || '—' }}
-                      @if (f.cuit) {
-                        <span class="block text-xs text-muted tabular-nums">{{ f.cuit }}</span>
-                      }
-                      @if (f.nota) {
-                        <span class="block text-xs whitespace-normal text-amber-700">{{ f.nota }}</span>
-                      }
-                    </td>
-                    <td class="px-3 py-2 font-mono text-xs">{{ (bloque.config.id === 'faltan_en_arca' ? f.documento : f.certificado) || '—' }}</td>
-                    <td class="px-5 py-2 text-right font-semibold tabular-nums">{{ f.importe | currency: 'ARS' : 'symbol-narrow' }}</td>
-                  </tr>
-                }
-              </tbody>
-            </table>
-          </div>
+          @if (avisable) {
+            <label class="flex cursor-pointer items-center gap-3 border-y border-line bg-canvas/50 px-5 py-2 text-xs font-semibold text-muted select-none">
+              <input
+                type="checkbox"
+                [checked]="marcaTodas() === 'todas'"
+                [indeterminate]="marcaTodas() === 'algunas'"
+                (change)="alternarTodas()"
+                class="h-4 w-4 cursor-pointer accent-amber-600"
+              />
+              Elegir {{ bloque.total === 1 ? 'el movimiento' : 'los ' + bloque.total + ' movimientos' }} para avisar al cliente
+            </label>
+          } @else {
+            <div class="border-t border-line"></div>
+          }
+          <ul class="flex-1 divide-y divide-line">
+            @for (f of bloque.filas; track f.id ?? $index) {
+              @let marcada = avisable && elegida(f);
+              <li>
+                <label
+                  class="flex items-center gap-3 px-5 py-2.5 text-sm transition-colors"
+                  [class]="avisable ? (marcada ? 'cursor-pointer bg-amber-50/70' : 'cursor-pointer hover:bg-canvas/60') : ''"
+                >
+                  @if (avisable) {
+                    <input
+                      type="checkbox"
+                      [checked]="marcada"
+                      (change)="alternar(f)"
+                      class="h-4 w-4 shrink-0 cursor-pointer accent-amber-600"
+                    />
+                  }
+                  <span class="min-w-0 flex-1">
+                    <span class="block truncate font-medium">{{ f.razon_social || f.descripcion || '—' }}</span>
+                    <span class="block truncate text-xs text-muted">
+                      {{ f.fecha | date: 'dd/MM/yyyy' }}
+                      @if (f.impuesto) { · {{ f.impuesto }} }
+                      @if (avisable ? f.documento : f.certificado; as ref) { · <span class="font-mono">{{ ref }}</span> }
+                    </span>
+                  </span>
+                  <span class="shrink-0 font-semibold tabular-nums">{{ f.importe | currency: 'ARS' : 'symbol-narrow' }}</span>
+                </label>
+              </li>
+            }
+          </ul>
+          @if (bloque.total > casosEnResumen) {
+            <button
+              type="button"
+              (click)="elegirPestana(bloque.config.id)"
+              class="border-t border-line px-5 py-2 text-left text-xs font-semibold text-brand-700 hover:bg-brand-50"
+            >
+              Y {{ bloque.total - casosEnResumen }} más en el detalle →
+            </button>
+          }
+          @if (avisable) {
+            <!-- Lo elegido para avisar al cliente -->
+            <div
+              class="flex items-center justify-between gap-3 border-t px-5 py-3 text-sm"
+              [class]="seleccionadas().length ? 'border-amber-200 bg-amber-50' : 'border-line bg-canvas/40'"
+            >
+              @if (seleccionadas().length) {
+                <p class="text-amber-900">
+                  <span class="font-semibold">{{ seleccionadas().length }}</span>
+                  {{ seleccionadas().length === 1 ? 'elegido' : 'elegidos' }} ·
+                  <span class="font-semibold tabular-nums">{{ totalSeleccionado() | currency: 'ARS' : 'symbol-narrow' }}</span>
+                  <button type="button" (click)="quitarSeleccion()" class="ml-2 text-xs font-semibold text-amber-900/60 hover:text-amber-900 hover:underline">
+                    Quitar
+                  </button>
+                </p>
+              } @else {
+                <p class="text-xs text-muted">Tildá los movimientos que querés consultarle al cliente.</p>
+              }
+              <button
+                type="button"
+                (click)="abrirAviso()"
+                [disabled]="!seleccionadas().length"
+                class="inline-flex shrink-0 items-center gap-2 rounded-lg bg-amber-600 px-3 py-1.5 font-semibold text-white transition-colors hover:bg-amber-700 disabled:cursor-not-allowed disabled:bg-amber-600/30"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M4 4h16v12H5.2L4 17.2V4Z" /><path d="M8 9h8M8 12h5" />
+                </svg>
+                Avisar al cliente
+              </button>
+            </div>
+          }
         } @else {
           <p class="border-t border-line px-5 py-6 text-center text-sm text-emerald-700">✓ {{ bloque.config.vacio }}</p>
         }
@@ -261,7 +336,7 @@
           <tbody class="divide-y divide-line">
             @for (i of store.porImpuesto(); track i.impuesto) {
               @let parte = i.importe_arca ? i.conciliado / i.importe_arca : i.importe_mayor ? 0 : 1;
-              <tr class="cursor-pointer hover:bg-canvas/60" (click)="impuestoFiltro.set(i.impuesto)" title="Filtrar el detalle por este impuesto">
+              <tr class="cursor-pointer hover:bg-canvas/60" (click)="filtrarImpuesto(i.impuesto)" title="Filtrar el detalle por este impuesto">
                 <td class="px-4 py-3 font-medium">{{ i.impuesto }}</td>
                 <td class="px-4 py-3 text-right tabular-nums">
                   {{ i.importe_arca | currency: 'ARS' : 'symbol-narrow' }}
@@ -292,25 +367,51 @@
 
   <!-- Detalle -->
   <section id="detalle" class="scroll-mt-4 rounded-2xl border border-line bg-white">
-    <div class="flex flex-wrap items-start justify-between gap-3 px-6 pt-5">
-      <div>
-        <h2 class="text-lg font-semibold">{{ config().letra ? config().letra + ' · ' : '' }}{{ config().titulo }}</h2>
-        <p class="text-sm text-muted">{{ config().significado }} · <span class="font-medium text-ink">{{ config().accion }}</span></p>
-      </div>
-      <div class="flex flex-wrap gap-1 rounded-lg border border-line bg-canvas p-1">
-        @for (p of pestanas; track p.id) {
-          @if (p.id !== 'revisar' || cantidad('revisar')) {
-            <button
-              type="button"
-              (click)="elegirPestana(p.id)"
-              class="rounded-md px-3 py-1.5 text-sm font-semibold transition-colors"
-              [class]="pestanaActiva() === p.id ? 'bg-white text-brand-700 shadow-sm' : 'text-muted hover:text-ink'"
+    <!-- Pestañas -->
+    <nav class="flex gap-1 overflow-x-auto border-b border-line px-4 pt-2" aria-label="Detalle">
+      @for (p of pestanas; track p.id) {
+        @if (p.id !== 'revisar' || cantidad('revisar')) {
+          @let activa = pestanaActiva() === p.id;
+          <button
+            type="button"
+            (click)="elegirPestana(p.id)"
+            [attr.aria-current]="activa ? 'page' : null"
+            class="-mb-px flex shrink-0 items-center gap-2 border-b-2 px-3 py-3 text-sm font-semibold transition-colors"
+            [class]="activa ? 'border-brand-600 text-brand-700' : 'border-transparent text-muted hover:border-line hover:text-ink'"
+          >
+            @if (p.letra) {
+              <span class="text-xs font-bold opacity-60">{{ p.letra }}</span>
+            }
+            {{ p.titulo }}
+            <span
+              class="min-w-6 rounded-full px-1.5 py-0.5 text-center text-xs tabular-nums"
+              [class]="activa ? 'bg-brand-50 text-brand-700' : 'bg-canvas text-muted'"
             >
-              {{ p.letra ? p.letra + ' · ' : '' }}{{ p.titulo }} <span class="font-normal">({{ cantidad(p.id) }})</span>
-            </button>
-          }
+              {{ cantidad(p.id) }}
+            </span>
+          </button>
         }
+      }
+    </nav>
+
+    <!-- Qué es esta bandeja y qué hacer -->
+    <div class="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 px-6 pt-5">
+      <div class="min-w-0">
+        <h2 class="text-lg font-semibold">{{ config().titulo }}</h2>
+        <p class="mt-0.5 text-sm text-muted">{{ config().significado }}</p>
       </div>
+      <span
+        class="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold"
+        [class]="{
+          verde: 'bg-emerald-50 text-emerald-700',
+          ambar: 'bg-amber-50 text-amber-800',
+          rojo: 'bg-red-50 text-red-700',
+          marca: 'bg-brand-50 text-brand-700'
+        }[config().tono]"
+      >
+        <span class="h-1.5 w-1.5 rounded-full bg-current"></span>
+        {{ config().accion }}
+      </span>
     </div>
 
     @if (store.errorPar(); as mensaje) {
@@ -375,8 +476,8 @@
       </div>
     } @else {
       <!-- Filtros -->
-      <div class="flex flex-wrap items-center gap-3 px-6 py-4">
-        <div class="relative min-w-60 flex-1">
+      <div class="flex flex-wrap items-center gap-2 px-6 pt-4 pb-4">
+        <div class="relative min-w-64 flex-1">
           <svg class="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" />
           </svg>
@@ -385,160 +486,397 @@
             placeholder="Buscar por CUIT, razón social, certificado, documento o importe"
             [value]="busqueda()"
             (input)="busqueda.set($any($event.target).value)"
-            class="w-full rounded-lg border border-line py-2 pr-3 pl-9 text-sm focus:border-brand-400 focus:outline-none"
+            class="h-10 w-full rounded-lg border border-line bg-white pr-3 pl-9 text-sm transition-colors placeholder:text-muted/80 focus:border-brand-400 focus:ring-2 focus:ring-brand-100 focus:outline-none"
           />
         </div>
-        <select
-          [value]="impuestoFiltro()"
-          (change)="impuestoFiltro.set($any($event.target).value)"
-          class="rounded-lg border border-line bg-white px-3 py-2 text-sm"
-          aria-label="Filtrar por impuesto"
-        >
-          <option value="">Todos los impuestos</option>
-          @for (i of impuestos(); track i) {
-            <option [value]="i" [selected]="i === impuestoFiltro()">{{ i }}</option>
-          }
-        </select>
         @if (hayFiltro()) {
-          <button type="button" (click)="busqueda.set(''); impuestoFiltro.set('')" class="text-sm font-semibold text-brand-700 hover:underline">
-            Limpiar filtros
+          <button
+            type="button"
+            (click)="limpiarFiltros()"
+            class="inline-flex h-10 items-center gap-1.5 rounded-lg px-3 text-sm font-semibold text-muted transition-colors hover:bg-canvas hover:text-ink"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
+            Limpiar{{ cantidadFiltros() ? ' (' + cantidadFiltros() + (cantidadFiltros() === 1 ? ' filtro)' : ' filtros)') : '' }}
           </button>
         }
+        <div class="ml-auto flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            (click)="abrirNuevo()"
+            class="inline-flex h-10 items-center gap-1.5 rounded-lg border border-brand-400 bg-white px-3 text-sm font-semibold text-brand-700 transition-colors hover:bg-brand-50"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14" /></svg>
+            Agregar movimiento
+          </button>
+          @if (pendientes()) {
+            <button
+              type="button"
+              (click)="deshacerEdiciones()"
+              [disabled]="store.guardando()"
+              class="inline-flex h-10 items-center gap-1.5 rounded-lg px-3 text-sm font-semibold text-muted transition-colors hover:bg-canvas hover:text-ink disabled:opacity-40"
+              title="Descarta lo que no guardaste"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6" /><path d="M21 17a9 9 0 0 0-15-6.7L3 13" /></svg>
+              Deshacer
+            </button>
+          }
+          <button
+            type="button"
+            (click)="guardar()"
+            [disabled]="!pendientes() || store.guardando()"
+            class="inline-flex h-10 items-center gap-1.5 rounded-lg px-4 text-sm font-semibold shadow-sm transition-colors disabled:cursor-not-allowed"
+            [class]="guardado() ? 'bg-emerald-600 text-white' : pendientes() ? 'bg-brand-600 text-white hover:bg-brand-700' : 'bg-canvas text-muted'"
+            title="Guarda los cambios: el resumen y el Excel se rehacen con ellos"
+          >
+            @if (store.guardando()) {
+              <span class="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white"></span> Guardando…
+            } @else if (guardado()) {
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L20 7" /></svg> Guardado
+            } @else {
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h11l3 3v15H5z" /><path d="M8 3v5h7V3M8 21v-7h8v7" /></svg>
+              Guardar cambios{{ pendientes() ? ' (' + pendientes() + ')' : '' }}
+            }
+          </button>
+        </div>
       </div>
+      <p class="-mt-2 px-6 pb-3 text-xs text-muted">
+        Hacé clic en una fecha, nombre, comprobante o importe para corregirlo, o en el tacho para quitar el movimiento.
+        @if (pendientes()) {
+          <span class="font-semibold text-amber-700">Hay cambios sin guardar: guardalos para que cuenten en el resumen y en el Excel.</span>
+        } @else {
+          Al guardar, el resumen y el Excel se rehacen con los cambios.
+        }
+      </p>
+      @if (store.errorGuardado()) {
+        <p class="mx-6 mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{{ store.errorGuardado() }}</p>
+      }
 
-      <div class="overflow-x-auto border-t border-line">
-        <table class="min-w-full text-sm whitespace-nowrap">
-          <thead class="bg-canvas/60 text-left text-xs tracking-wider text-muted uppercase">
+      <!-- Agregados sin guardar -->
+      @if (nuevos().length) {
+        <div class="mx-6 mb-3 rounded-xl border border-amber-200 bg-amber-50/60 p-3">
+          <p class="mb-2 text-xs font-semibold tracking-wide text-amber-800 uppercase">Por guardar · {{ nuevos().length }} {{ nuevos().length === 1 ? 'movimiento nuevo' : 'movimientos nuevos' }}</p>
+          <ul class="space-y-1.5">
+            @for (n of nuevos(); track $index) {
+              <li class="flex items-center gap-3 rounded-lg bg-white px-3 py-2 text-sm">
+                <span class="rounded-md bg-amber-100 px-1.5 py-0.5 text-[11px] font-semibold text-amber-800">{{ n.lado === 'arca' ? 'ARCA' : 'Mayor' }}</span>
+                <span class="tabular-nums text-muted">{{ fechaCorta(n.fecha) }}</span>
+                <span class="min-w-0 flex-1 truncate font-medium">{{ n.razon_social }}</span>
+                <span class="text-muted">{{ n.impuesto }}</span>
+                <span class="font-semibold tabular-nums">{{ pesos(n.importe) }}</span>
+                <button type="button" (click)="quitarNuevo($index)" class="rounded p-1 text-muted hover:bg-red-50 hover:text-red-700" aria-label="Quitar">
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
+                </button>
+              </li>
+            }
+          </ul>
+        </div>
+      }
+
+      <!-- Texto con lo buscado pintado en amarillo -->
+      <ng-template #resaltado let-texto>@for (p of partes(texto); track $index) {@if (p.marca) {<mark class="rounded bg-yellow-200 text-inherit">{{ p.texto }}</mark>} @else {{{ p.texto }}}}</ng-template>
+
+      <!-- Encabezado: ordenar con un clic y embudo al estilo Excel -->
+      <ng-template #encabezado let-campo let-titulo="titulo" let-derecha="derecha">
+        <th class="px-4 py-3 font-semibold">
+          <div class="flex items-center gap-1" [class.justify-end]="derecha">
+            <button type="button" (click)="ordenarPor(campo)" class="uppercase hover:text-ink">{{ titulo }} {{ flecha(campo) }}</button>
+            <button
+              type="button"
+              (click)="abrirFiltro(campo, $event)"
+              class="rounded p-1 transition-colors"
+              [class]="tieneFiltro(campo) ? 'bg-brand-50 text-brand-700' : 'text-muted/50 hover:bg-white hover:text-ink'"
+              [attr.aria-label]="'Filtrar por ' + titulo"
+              [title]="tieneFiltro(campo) ? 'Hay un filtro en ' + titulo : 'Filtrar por ' + titulo"
+            >
+              <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" [attr.fill]="tieneFiltro(campo) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 4h18l-7 9v6l-4 2v-8z" /></svg>
+            </button>
+          </div>
+        </th>
+      </ng-template>
+
+      <!-- Celda editable: se ve como texto (con lo buscado en amarillo) y al hacer clic es un input -->
+      <ng-template #editable let-item let-campo="campo" let-texto="texto" let-clase="clase">
+        @if (enEdicion(item, campo)) {
+          <input
+            #celdaEnEdicion
+            [type]="campo === 'fecha' ? 'date' : 'text'"
+            [attr.inputmode]="campo === 'importe' ? 'decimal' : null"
+            [value]="borrador()!.valor"
+            (input)="escribir($any($event.target).value)"
+            (keydown.enter)="confirmarBorrador()"
+            (keydown.escape)="cancelarBorrador()"
+            (blur)="confirmarBorrador()"
+            (click)="$event.stopPropagation()"
+            class="w-full min-w-28 rounded-md border bg-white px-2 py-1 text-sm text-ink focus:ring-2 focus:outline-none"
+            [class.border-red-400]="borrador()!.error"
+            [class.border-brand-400]="!borrador()!.error"
+            [class.text-right]="campo === 'importe'"
+            [title]="borrador()!.error ? (campo === 'importe' ? 'Escribí un importe, por ejemplo 1.234,56' : 'Elegí una fecha válida') : 'Enter para guardar, Esc para cancelar'"
+          />
+        } @else {
+          <button
+            type="button"
+            (click)="$event.stopPropagation(); editar(item, campo)"
+            [disabled]="!item.id"
+            class="-mx-1.5 block max-w-full rounded px-1.5 py-0.5 text-left transition-colors hover:bg-brand-50 disabled:hover:bg-transparent {{ clase ?? '' }}"
+            [class.w-full]="campo === 'importe'"
+            [class.underline]="editado(item, campo)"
+            [class.decoration-dotted]="editado(item, campo)"
+            [class.decoration-brand-400]="editado(item, campo)"
+            [title]="editado(item, campo) ? 'Editado a mano · clic para cambiarlo' : 'Clic para editar'"
+          ><ng-container *ngTemplateOutlet="resaltado; context: { $implicit: texto }" /></button>
+        }
+      </ng-template>
+
+      <!-- Panel del embudo: orden, buscador por letra y los valores con su casilla -->
+      @if (filtroAbierto(); as f) {
+        <div class="fixed inset-0 z-40" (click)="filtroAbierto.set(null)"></div>
+        <div
+          class="fixed z-50 w-64 rounded-xl border border-line bg-white p-1.5 text-sm shadow-lg"
+          [style.top.px]="f.top"
+          [style.left.px]="f.left"
+        >
+          <div class="flex gap-1">
+            <button type="button" (click)="ordenarComo(f.campo, 1)" class="flex-1 rounded-md px-2 py-1.5 text-xs font-semibold transition-colors"
+              [class]="orden().campo === f.campo && orden().dir === 1 ? 'bg-brand-50 text-brand-700' : 'text-muted hover:bg-canvas'">
+              {{ f.campo === 'importe' || f.campo === 'fecha' ? 'Menor a mayor' : 'A → Z' }}
+            </button>
+            <button type="button" (click)="ordenarComo(f.campo, -1)" class="flex-1 rounded-md px-2 py-1.5 text-xs font-semibold transition-colors"
+              [class]="orden().campo === f.campo && orden().dir === -1 ? 'bg-brand-50 text-brand-700' : 'text-muted hover:bg-canvas'">
+              {{ f.campo === 'importe' || f.campo === 'fecha' ? 'Mayor a menor' : 'Z → A' }}
+            </button>
+          </div>
+          <div class="my-1.5 h-px bg-line"></div>
+          <input
+            type="search"
+            placeholder="Buscar…"
+            [value]="busquedaFiltro()"
+            (input)="busquedaFiltro.set($any($event.target).value)"
+            class="mb-1 h-8 w-full rounded-md border border-line px-2 text-xs focus:border-brand-400 focus:outline-none"
+          />
+          <label class="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-canvas">
+            <input type="checkbox" class="accent-brand-600" [checked]="todosMarcados()" (change)="alternarTodos(f.campo)" />
+            <span class="text-xs text-muted">Seleccionar todo</span>
+          </label>
+          <div class="max-h-52 overflow-y-auto">
+            @for (v of valoresUnicos(); track v) {
+              <label class="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-canvas">
+                <input type="checkbox" class="accent-brand-600" [checked]="marcado(f.campo, v)" (change)="alternarValor(f.campo, v)" />
+                <span class="truncate text-xs">{{ v }}</span>
+              </label>
+            } @empty {
+              <p class="px-2 py-3 text-center text-xs text-muted">Nada coincide.</p>
+            }
+          </div>
+          @if (tieneFiltro(f.campo)) {
+            <div class="my-1 h-px bg-line"></div>
+            <button type="button" (click)="limpiarFiltro(f.campo)" class="w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-muted hover:bg-canvas hover:text-ink">
+              Limpiar filtro de la columna
+            </button>
+          }
+        </div>
+      }
+
+      <!-- Caja de alto mediano con su propio scroll; "Ver todo" la estira -->
+      <div class="overflow-y-auto border-t border-line" [class.max-h-[30rem]]="!tablaExpandida()" (scroll)="ubicarFiltro()">
+        <table class="w-full table-fixed text-[15px]">
+          <colgroup>
+            <col class="w-14" />
+            <col class="w-32" />
+            <col />
+            <col class="w-36" />
+            <col class="w-40" />
+            @if (pestanaActiva() === 'faltan_en_mayor') {
+              <col class="w-32" />
+            }
+            <col class="w-14" />
+          </colgroup>
+          <thead class="sticky top-0 z-10 bg-canvas text-left text-xs tracking-wider text-muted uppercase shadow-[inset_0_-1px_0_var(--color-line,#e5e7eb)]">
             <tr>
-              <th class="px-4 py-3 font-semibold">
-                <button type="button" (click)="ordenarPor('fecha')" class="uppercase hover:text-ink">Fecha {{ flecha('fecha') }}</button>
-              </th>
-              <th class="px-4 py-3 font-semibold">
-                <button type="button" (click)="ordenarPor('razon_social')" class="uppercase hover:text-ink">
-                  {{ pestanaActiva() === 'faltan_en_arca' ? 'Organización' : 'Agente' }} {{ flecha('razon_social') }}
+              <th class="py-3 pl-4">
+                <button
+                  type="button"
+                  (click)="alternarTodosDesplegados()"
+                  class="grid h-7 w-7 place-items-center rounded-md text-muted hover:bg-white hover:text-ink"
+                  [title]="todosDesplegados() ? 'Plegar todos' : 'Desplegar todos'"
+                >
+                  <svg class="h-4 w-4 transition-transform" [class.rotate-90]="todosDesplegados()" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6" /></svg>
                 </button>
               </th>
-              <th class="px-4 py-3 font-semibold">
-                <button type="button" (click)="ordenarPor('impuesto')" class="uppercase hover:text-ink">Impuesto {{ flecha('impuesto') }}</button>
-              </th>
-              @switch (pestanaActiva()) {
-                @case ('conciliados') {
-                  <th class="px-4 py-3 font-semibold">Certificado</th>
-                  <th class="px-4 py-3 font-semibold">Asiento</th>
-                  <th class="px-4 py-3 font-semibold">Criterio</th>
-                }
-                @case ('faltan_en_mayor') {
-                  <th class="px-4 py-3 font-semibold">Certificado</th>
-                  <th class="px-4 py-3 font-semibold">Régimen</th>
-                }
-                @case ('faltan_en_arca') {
-                  <th class="px-4 py-3 font-semibold">Cuenta</th>
-                  <th class="px-4 py-3 font-semibold">Documento</th>
-                }
-              }
-              <th class="px-4 py-3 text-right font-semibold">
-                <button type="button" (click)="ordenarPor('importe')" class="uppercase hover:text-ink">Importe {{ flecha('importe') }}</button>
-              </th>
+              <ng-container *ngTemplateOutlet="encabezado; context: { $implicit: 'fecha', titulo: 'Fecha' }" />
+              <ng-container *ngTemplateOutlet="encabezado; context: { $implicit: 'razon_social', titulo: pestanaActiva() === 'faltan_en_arca' ? 'Organización' : 'Agente' }" />
+              <ng-container *ngTemplateOutlet="encabezado; context: { $implicit: 'impuesto', titulo: 'Impuesto' }" />
+              <ng-container *ngTemplateOutlet="encabezado; context: { $implicit: 'importe', titulo: 'Importe', derecha: true }" />
               @if (pestanaActiva() === 'faltan_en_mayor') {
                 <th class="px-4 py-3"></th>
               }
+              <th class="py-3 pr-4"><span class="sr-only">Quitar</span></th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-line">
+          <tbody>
             @for (item of filas(); track item.id ?? $index) {
               @let responsable = esResponsable(item);
+              @let abierta = desplegada(item);
+              @let quitada = eliminado(item);
               <tr
-                [class]="responsable ? 'bg-red-50/70 text-red-800 hover:bg-red-50' : 'hover:bg-canvas/60'"
-                [title]="responsable ? 'Responsable de la diferencia ARCA − Mayor' : ''"
+                (click)="alternarDesplegada(item)"
+                class="cursor-pointer border-t border-line transition-colors"
+                [class]="responsable ? 'bg-red-50/70 text-red-800 hover:bg-red-50' : abierta ? 'bg-canvas/60' : 'hover:bg-canvas/50'"
+                [class.opacity-50]="quitada"
+                [class.line-through]="quitada"
+                [title]="quitada ? 'Se quita al guardar' : responsable ? 'Responsable de la diferencia ARCA − Mayor' : 'Clic para ver el resto de los datos'"
               >
-                <td class="px-4 py-3 tabular-nums" [class.border-l-4]="responsable" [class.border-red-500]="responsable">
-                  {{ item.fecha | date: 'dd/MM/yyyy' }}
+                <td class="py-3.5 pl-4 align-top" [class.border-l-4]="responsable" [class.border-red-500]="responsable">
+                  <span class="grid h-7 w-7 place-items-center rounded-md text-muted">
+                    <svg class="h-4 w-4 transition-transform" [class.rotate-90]="abierta" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6" /></svg>
+                  </span>
                 </td>
-                <td class="max-w-72 px-4 py-3">
-                  <p class="truncate font-medium">{{ item.razon_social || '—' }}</p>
+                <td class="px-4 py-3.5 align-top tabular-nums">
+                  <ng-container *ngTemplateOutlet="editable; context: { $implicit: item, campo: 'fecha', texto: fechaCorta(item.fecha) }" />
+                </td>
+                <td class="px-4 py-3.5 align-top">
+                  <ng-container *ngTemplateOutlet="editable; context: { $implicit: item, campo: 'razon_social', texto: item.razon_social || '—', clase: 'font-semibold break-words' }" />
                   @if (item.cuit) {
-                    <p class="font-mono text-xs text-muted">{{ item.cuit }}</p>
-                  }
-                  @if (item.nota) {
-                    <p class="mt-0.5 text-xs whitespace-normal text-amber-700">{{ item.nota }}</p>
+                    <p class="mt-0.5 font-mono text-[13px] text-muted">
+                      <ng-container *ngTemplateOutlet="resaltado; context: { $implicit: item.cuit }" />
+                    </p>
                   }
                 </td>
-                <td class="px-4 py-3">
+                <td class="px-4 py-3.5 align-top">
                   {{ item.impuesto || '—' }}
                   @if (item.tipo) {
-                    <span class="block text-xs text-muted">{{ item.tipo === 'Percepcion' ? 'Percepción' : 'Retención' }}</span>
+                    <span class="block text-[13px] text-muted">{{ item.tipo === 'Percepcion' ? 'Percepción' : 'Retención' }}</span>
                   }
                 </td>
-                @switch (pestanaActiva()) {
-                  @case ('conciliados') {
-                    <td class="px-4 py-3 font-mono text-xs">{{ item.certificado || '—' }}</td>
-                    <td class="px-4 py-3">
-                      <p class="font-mono text-xs">{{ item.documento_mayor || '—' }}</p>
-                      <p class="text-xs text-muted">
-                        {{ item.fecha_mayor | date: 'dd/MM/yyyy' }}
-                        @if (item.diferencia_dias) {
-                          <span [class]="item.diferencia_dias > store.resumen()!.tolerancia_dias ? 'text-amber-700' : ''">· {{ item.diferencia_dias }} d</span>
-                        }
-                      </p>
-                    </td>
-                    <td class="px-4 py-3">
-                      <span
-                        class="rounded-full px-2.5 py-1 text-xs font-semibold"
-                        [class]="item.criterio === 'manual' ? 'bg-amber-50 text-amber-800' : 'bg-brand-50 text-brand-700'"
-                      >
-                        {{ criterio(item) }}
-                      </span>
-                      @if (item.criterio === 'manual' && item.id) {
-                        <button
-                          type="button"
-                          (click)="store.desemparejar(item.id)"
-                          [disabled]="!!store.emparejando()"
-                          class="ml-2 text-xs font-semibold text-muted underline-offset-2 hover:text-ink hover:underline disabled:opacity-40"
-                        >
-                          {{ store.emparejando() === item.id ? 'Deshaciendo…' : 'Deshacer' }}
-                        </button>
-                      }
-                    </td>
-                  }
-                  @case ('faltan_en_mayor') {
-                    <td class="px-4 py-3 font-mono text-xs">{{ item.certificado || '—' }}</td>
-                    <td class="max-w-56 truncate px-4 py-3 text-xs text-muted" [title]="item.regimen ?? ''">{{ item.regimen || '—' }}</td>
-                  }
-                  @case ('faltan_en_arca') {
-                    <td class="max-w-56 truncate px-4 py-3 text-xs" [title]="item.cuenta ?? ''">{{ item.cuenta || '—' }}</td>
-                    <td class="max-w-64 px-4 py-3">
-                      <p class="font-mono text-xs">{{ item.documento || '—' }}</p>
-                      @if (item.descripcion) {
-                        <p class="truncate text-xs text-muted" [title]="item.descripcion">{{ item.descripcion }}</p>
-                      }
-                    </td>
-                  }
-                }
-                <td class="px-4 py-3 text-right font-semibold tabular-nums" [class.text-red-700]="responsable">
-                  {{ item.importe | currency: 'ARS' : 'symbol-narrow' }}
+                <td class="px-4 py-3.5 text-right align-top font-semibold tabular-nums" [class.text-red-700]="responsable">
+                  <ng-container *ngTemplateOutlet="editable; context: { $implicit: item, campo: 'importe', texto: pesos(item.importe), clase: 'text-right tabular-nums' }" />
                   @if (item.diferencia_importe) {
-                    <span class="block text-xs font-normal" [class]="responsable ? 'text-red-700' : 'text-amber-700'">
+                    <span class="block text-[13px] font-normal" [class]="responsable ? 'text-red-700' : 'text-amber-700'">
                       mayor {{ item.importe_mayor | currency: 'ARS' : 'symbol-narrow' }}
                     </span>
                   }
                 </td>
                 @if (pestanaActiva() === 'faltan_en_mayor') {
-                  <td class="px-4 py-3 text-right">
+                  <td class="px-4 py-3 text-right align-top">
                     <button
                       type="button"
-                      (click)="abrirEmparejar(item)"
+                      (click)="$event.stopPropagation(); abrirEmparejar(item)"
                       [disabled]="!cantidad('faltan_en_arca') || !!store.emparejando()"
                       [title]="cantidad('faltan_en_arca') ? 'Conciliar con un asiento del mayor' : 'No hay asientos sin certificado para emparejar'"
-                      class="rounded-lg border border-line px-3 py-1.5 text-xs font-semibold transition-colors hover:bg-canvas disabled:cursor-not-allowed disabled:opacity-40"
+                      class="rounded-lg border border-line bg-white px-3 py-1.5 text-xs font-semibold transition-colors hover:bg-canvas disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       Emparejar…
                     </button>
                   </td>
                 }
+                <td class="py-3 pr-4 text-right align-top">
+                  <button
+                    type="button"
+                    (click)="$event.stopPropagation(); alternarEliminado(item)"
+                    [disabled]="!item.id"
+                    class="grid h-8 w-8 place-items-center rounded-lg no-underline transition-colors"
+                    [class]="quitada ? 'bg-brand-50 text-brand-700 hover:bg-brand-100' : 'text-muted hover:bg-red-50 hover:text-red-700'"
+                    [title]="quitada ? 'No quitar' : 'Quitar este movimiento (al guardar)'"
+                    [attr.aria-label]="quitada ? 'No quitar' : 'Quitar'"
+                  >
+                    @if (quitada) {
+                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6" /><path d="M21 17a9 9 0 0 0-15-6.7L3 13" /></svg>
+                    } @else {
+                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg>
+                    }
+                  </button>
+                </td>
               </tr>
+
+              <!-- El resto de los datos, en un cuadro que se despliega -->
+              @if (abierta) {
+                <tr [class]="responsable ? 'bg-red-50/40' : 'bg-canvas/60'">
+                  <td [attr.colspan]="pestanaActiva() === 'faltan_en_mayor' ? 7 : 6" class="px-4 pt-0 pb-4">
+                    <dl class="ml-10 grid gap-x-6 gap-y-3 rounded-xl border border-line bg-white p-4 text-sm text-ink sm:grid-cols-2 lg:grid-cols-3">
+                      @switch (pestanaActiva()) {
+                        @case ('conciliados') {
+                          <div>
+                            <dt class="text-xs font-semibold tracking-wide text-muted uppercase">Certificado</dt>
+                            <dd class="mt-1 font-mono">
+                              <ng-container *ngTemplateOutlet="editable; context: { $implicit: item, campo: 'certificado', texto: item.certificado || '—' }" />
+                            </dd>
+                          </div>
+                          <div>
+                            <dt class="text-xs font-semibold tracking-wide text-muted uppercase">Asiento en el mayor</dt>
+                            <dd class="mt-1">
+                              <span class="font-mono">{{ item.documento_mayor || '—' }}</span>
+                              <span class="block text-muted">
+                                {{ item.fecha_mayor | date: 'dd/MM/yyyy' }}
+                                @if (item.diferencia_dias) {
+                                  <span [class]="item.diferencia_dias > store.resumen()!.tolerancia_dias ? 'text-amber-700' : ''">· {{ item.diferencia_dias }} días de diferencia</span>
+                                }
+                              </span>
+                            </dd>
+                          </div>
+                          <div>
+                            <dt class="text-xs font-semibold tracking-wide text-muted uppercase">Cómo se concilió</dt>
+                            <dd class="mt-1 flex flex-wrap items-center gap-2">
+                              <span
+                                class="rounded-full px-2.5 py-1 text-xs font-semibold"
+                                [class]="item.criterio === 'manual' ? 'bg-amber-50 text-amber-800' : 'bg-brand-50 text-brand-700'"
+                              >
+                                {{ criterio(item) }}
+                              </span>
+                              @if (item.criterio === 'manual' && item.id) {
+                                <button
+                                  type="button"
+                                  (click)="store.desemparejar(item.id)"
+                                  [disabled]="!!store.emparejando()"
+                                  class="text-xs font-semibold text-muted underline-offset-2 hover:text-ink hover:underline disabled:opacity-40"
+                                >
+                                  {{ store.emparejando() === item.id ? 'Deshaciendo…' : 'Deshacer' }}
+                                </button>
+                              }
+                            </dd>
+                          </div>
+                        }
+                        @case ('faltan_en_mayor') {
+                          <div>
+                            <dt class="text-xs font-semibold tracking-wide text-muted uppercase">Certificado</dt>
+                            <dd class="mt-1 font-mono">
+                              <ng-container *ngTemplateOutlet="editable; context: { $implicit: item, campo: 'certificado', texto: item.certificado || '—' }" />
+                            </dd>
+                          </div>
+                          <div class="lg:col-span-2">
+                            <dt class="text-xs font-semibold tracking-wide text-muted uppercase">Régimen</dt>
+                            <dd class="mt-1 break-words">{{ item.regimen || '—' }}</dd>
+                          </div>
+                        }
+                        @case ('faltan_en_arca') {
+                          <div>
+                            <dt class="text-xs font-semibold tracking-wide text-muted uppercase">Documento</dt>
+                            <dd class="mt-1 font-mono">
+                              <ng-container *ngTemplateOutlet="editable; context: { $implicit: item, campo: 'documento', texto: item.documento || '—' }" />
+                            </dd>
+                          </div>
+                          <div>
+                            <dt class="text-xs font-semibold tracking-wide text-muted uppercase">Cuenta</dt>
+                            <dd class="mt-1 break-words">{{ item.cuenta || '—' }}</dd>
+                          </div>
+                          <div>
+                            <dt class="text-xs font-semibold tracking-wide text-muted uppercase">Descripción</dt>
+                            <dd class="mt-1 break-words">{{ item.descripcion || '—' }}</dd>
+                          </div>
+                        }
+                      }
+                      @if (item.nota) {
+                        <div class="sm:col-span-2 lg:col-span-3">
+                          <dt class="text-xs font-semibold tracking-wide text-amber-700 uppercase">Nota</dt>
+                          <dd class="mt-1 text-amber-800">{{ item.nota }}</dd>
+                        </div>
+                      }
+                    </dl>
+                  </td>
+                </tr>
+              }
             } @empty {
               <tr>
-                <td colspan="9" class="px-6 py-16 text-center text-muted">
+                <td colspan="7" class="px-6 py-16 text-center text-muted">
                   {{ hayFiltro() ? 'Nada coincide con los filtros.' : config().vacio }}
                 </td>
               </tr>
@@ -548,10 +886,18 @@
       </div>
       <!-- Fuera del scroll horizontal: el total se ve siempre -->
       @if (filas().length) {
-        <div class="flex justify-between rounded-b-2xl border-t-2 border-line bg-canvas/40 px-6 py-3 text-sm">
+        <div class="flex items-center justify-between gap-3 rounded-b-2xl border-t-2 border-line bg-canvas/40 px-6 py-3 text-sm">
           <span class="text-muted">
             {{ filas().length }} {{ filas().length === 1 ? 'movimiento' : 'movimientos' }}{{ hayFiltro() ? ' (filtrado)' : '' }}
           </span>
+          <button
+            type="button"
+            (click)="tablaExpandida.set(!tablaExpandida())"
+            class="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold text-brand-700 transition-colors hover:bg-brand-50"
+          >
+            <svg class="h-3.5 w-3.5 transition-transform" [class.rotate-180]="tablaExpandida()" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6" /></svg>
+            {{ tablaExpandida() ? 'Achicar' : 'Ver todo' }}
+          </button>
           <span class="font-semibold tabular-nums">Total {{ totalFiltrado() | currency: 'ARS' : 'symbol-narrow' }}</span>
         </div>
       }
@@ -591,6 +937,127 @@
       }
     }
   </section>
+}
+
+<!-- Aviso al cliente -->
+@if (formNuevo(); as f) {
+  <div class="fixed inset-0 z-40 flex items-center justify-center bg-ink/40 p-4" (click)="formNuevo.set(null)">
+    <form
+      class="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-xl"
+      (click)="$event.stopPropagation()"
+      (submit)="$event.preventDefault(); agregarNuevo(importeNuevo.value)"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="titulo-nuevo"
+    >
+      <div class="border-b border-line px-6 py-4">
+        <h3 id="titulo-nuevo" class="text-lg font-semibold">Agregar movimiento</h3>
+        <p class="mt-1 text-sm text-muted">Queda en la lista «Por guardar» hasta que toques «Guardar cambios».</p>
+      </div>
+      <div class="grid gap-4 p-6 sm:grid-cols-2">
+        <div class="sm:col-span-2">
+          <span class="text-xs font-semibold tracking-wide text-muted uppercase">Dónde va</span>
+          <div class="mt-1.5 grid grid-cols-2 gap-1 rounded-lg bg-canvas p-1">
+            @for (l of [{ v: 'mayor', t: 'Libro Mayor (Xubio)' }, { v: 'arca', t: 'ARCA' }]; track l.v) {
+              <button
+                type="button"
+                (click)="campoNuevo('lado', $any(l.v))"
+                class="rounded-md py-2 text-sm font-semibold transition-colors"
+                [class]="f.lado === l.v ? 'bg-white text-brand-700 shadow-sm' : 'text-muted hover:text-ink'"
+              >
+                {{ l.t }}
+              </button>
+            }
+          </div>
+        </div>
+        <label class="block">
+          <span class="text-xs font-semibold tracking-wide text-muted uppercase">Fecha</span>
+          <input type="date" [value]="f.fecha" (input)="campoNuevo('fecha', $any($event.target).value)" class="mt-1.5 h-10 w-full rounded-lg border border-line px-3 text-sm focus:border-brand-400 focus:ring-2 focus:ring-brand-100 focus:outline-none" />
+        </label>
+        <label class="block">
+          <span class="text-xs font-semibold tracking-wide text-muted uppercase">Importe</span>
+          <input #importeNuevo type="text" inputmode="decimal" placeholder="1.234,56" class="mt-1.5 h-10 w-full rounded-lg border border-line px-3 text-right text-sm tabular-nums focus:border-brand-400 focus:ring-2 focus:ring-brand-100 focus:outline-none" />
+        </label>
+        <label class="block sm:col-span-2">
+          <span class="text-xs font-semibold tracking-wide text-muted uppercase">{{ f.lado === 'arca' ? 'Agente de retención' : 'Organización' }}</span>
+          <input type="text" [value]="f.razon_social" (input)="campoNuevo('razon_social', $any($event.target).value)" class="mt-1.5 h-10 w-full rounded-lg border border-line px-3 text-sm focus:border-brand-400 focus:ring-2 focus:ring-brand-100 focus:outline-none" />
+        </label>
+        <label class="block">
+          <span class="text-xs font-semibold tracking-wide text-muted uppercase">Impuesto</span>
+          <select [value]="f.impuesto" (change)="campoNuevo('impuesto', $any($event.target).value)" class="mt-1.5 h-10 w-full rounded-lg border border-line bg-white px-3 text-sm focus:border-brand-400 focus:ring-2 focus:ring-brand-100 focus:outline-none">
+            @for (i of impuestosConocidos(); track i) {
+              <option [value]="i" [selected]="i === f.impuesto">{{ i }}</option>
+            }
+          </select>
+        </label>
+        <label class="block">
+          <span class="text-xs font-semibold tracking-wide text-muted uppercase">Tipo</span>
+          <select [value]="f.tipo" (change)="campoNuevo('tipo', $any($event.target).value)" class="mt-1.5 h-10 w-full rounded-lg border border-line bg-white px-3 text-sm focus:border-brand-400 focus:ring-2 focus:ring-brand-100 focus:outline-none">
+            <option value="Retencion" [selected]="f.tipo === 'Retencion'">Retención</option>
+            <option value="Percepcion" [selected]="f.tipo === 'Percepcion'">Percepción</option>
+          </select>
+        </label>
+        <label class="block">
+          <span class="text-xs font-semibold tracking-wide text-muted uppercase">{{ f.lado === 'arca' ? 'Certificado' : 'Documento' }} <span class="font-normal normal-case">(opcional)</span></span>
+          <input type="text" [value]="f.comprobante ?? ''" (input)="campoNuevo('comprobante', $any($event.target).value)" class="mt-1.5 h-10 w-full rounded-lg border border-line px-3 font-mono text-sm focus:border-brand-400 focus:ring-2 focus:ring-brand-100 focus:outline-none" />
+        </label>
+        @if (f.lado === 'arca') {
+          <label class="block">
+            <span class="text-xs font-semibold tracking-wide text-muted uppercase">CUIT <span class="font-normal normal-case">(opcional)</span></span>
+            <input type="text" [value]="f.cuit ?? ''" (input)="campoNuevo('cuit', $any($event.target).value)" placeholder="30-12345678-9" class="mt-1.5 h-10 w-full rounded-lg border border-line px-3 font-mono text-sm focus:border-brand-400 focus:ring-2 focus:ring-brand-100 focus:outline-none" />
+          </label>
+        }
+        @if (errorNuevo()) {
+          <p class="text-sm text-red-700 sm:col-span-2">{{ errorNuevo() }}</p>
+        }
+      </div>
+      <div class="flex justify-end gap-2 border-t border-line bg-canvas/40 px-6 py-3">
+        <button type="button" (click)="formNuevo.set(null)" class="rounded-lg px-4 py-2 text-sm font-semibold text-muted hover:bg-canvas hover:text-ink">Cancelar</button>
+        <button type="submit" class="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700">Agregar</button>
+      </div>
+    </form>
+  </div>
+}
+
+@if (aviso() !== null) {
+  <div class="fixed inset-0 z-40 flex items-center justify-center bg-ink/40 p-4" (click)="aviso.set(null)" (keydown.escape)="aviso.set(null)">
+    <div class="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-xl" (click)="$event.stopPropagation()" role="dialog" aria-modal="true" aria-labelledby="titulo-aviso">
+      <div class="flex items-start justify-between gap-4 border-b border-line px-6 py-4">
+        <div>
+          <h3 id="titulo-aviso" class="text-lg font-semibold">Avisar al cliente</h3>
+          <p class="mt-1 text-sm text-muted">
+            {{ seleccionadas().length }} {{ seleccionadas().length === 1 ? 'movimiento' : 'movimientos' }} que ARCA no informa. Revisá el texto y cambiá lo que quieras antes de mandarlo.
+          </p>
+        </div>
+        <p class="shrink-0 text-xl font-semibold tabular-nums">{{ totalSeleccionado() | currency: 'ARS' : 'symbol-narrow' }}</p>
+      </div>
+      <div class="flex-1 overflow-y-auto p-6">
+        <textarea
+          [value]="aviso()"
+          (input)="aviso.set($any($event.target).value)"
+          rows="16"
+          class="w-full resize-y rounded-lg border border-line bg-canvas/30 p-4 text-sm leading-relaxed focus:border-brand-400 focus:ring-2 focus:ring-brand-100 focus:outline-none"
+          aria-label="Texto del aviso"
+        ></textarea>
+      </div>
+      <div class="flex flex-wrap items-center justify-end gap-2 border-t border-line px-6 py-3">
+        <button type="button" (click)="aviso.set(null)" class="mr-auto rounded-lg px-4 py-2 text-sm font-semibold text-muted hover:bg-canvas hover:text-ink">
+          Cerrar
+        </button>
+        <button type="button" (click)="enviarPorCorreo()" class="rounded-lg border border-line px-4 py-2 text-sm font-semibold hover:bg-canvas">
+          Abrir en el correo
+        </button>
+        <button
+          type="button"
+          (click)="copiarAviso()"
+          class="min-w-32 rounded-lg px-4 py-2 text-sm font-semibold text-white transition-colors"
+          [class]="copiado() ? 'bg-emerald-600' : 'bg-brand-700 hover:bg-brand-800'"
+        >
+          {{ copiado() ? '¡Copiado!' : 'Copiar texto' }}
+        </button>
+      </div>
+    </div>
+  </div>
 }
 
 <!-- Emparejar a mano -->
@@ -652,5 +1119,57 @@
         </button>
       </div>
     </div>
+  </div>
+}
+
+<!-- Enviar a revisión -->
+@if (envio(); as f) {
+  <div class="fixed inset-0 z-40 flex items-center justify-center bg-ink/40 p-4" (click)="envio.set(null)">
+    <form
+      class="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-xl"
+      (click)="$event.stopPropagation()"
+      (submit)="$event.preventDefault(); enviar()"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="titulo-envio"
+    >
+      <div class="border-b border-line px-6 py-4">
+        <h3 id="titulo-envio" class="text-lg font-semibold">Enviar a revisión</h3>
+        <p class="mt-1 text-sm text-muted">Se genera el papel de trabajo con lo guardado y queda en la bandeja como «Falta revisión».</p>
+      </div>
+      <div class="grid gap-4 px-6 py-5 sm:grid-cols-2">
+        <label class="text-sm">
+          <span class="font-semibold">Período</span>
+          <input type="text" [value]="f.periodo" (input)="campoEnvio('periodo', $any($event.target).value)"
+            class="mt-1 w-full rounded-lg border border-line px-3 py-2 outline-none focus:border-brand-400" placeholder="10/2026" />
+        </label>
+        <label class="text-sm">
+          <span class="font-semibold">Lo envía</span>
+          <input type="text" [value]="f.enviado_por" (input)="campoEnvio('enviado_por', $any($event.target).value)"
+            class="mt-1 w-full rounded-lg border border-line px-3 py-2 outline-none focus:border-brand-400" placeholder="Tu nombre" />
+        </label>
+        <label class="text-sm sm:col-span-2">
+          <span class="font-semibold">Comentario para quien revisa</span> <span class="text-muted">(opcional)</span>
+          <textarea rows="2" [value]="f.comentario" (input)="campoEnvio('comentario', $any($event.target).value)"
+            class="mt-1 w-full resize-none rounded-lg border border-line px-3 py-2 outline-none focus:border-brand-400"
+            placeholder="Ej.: revisar las dos retenciones de Proveedor SRL"></textarea>
+        </label>
+        @if (pendientes()) {
+          <p class="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 sm:col-span-2">
+            Tenés {{ pendientes() }} cambio(s) sin guardar: no van en el Excel hasta que toques «Guardar cambios».
+          </p>
+        }
+        @if (errorEnvio(); as mensaje) {
+          <p class="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 sm:col-span-2">{{ mensaje }}</p>
+        }
+      </div>
+      <div class="flex justify-end gap-2 border-t border-line bg-canvas/40 px-6 py-3">
+        <button type="button" (click)="envio.set(null)" class="rounded-lg px-4 py-2 font-semibold text-muted hover:bg-canvas">Cancelar</button>
+        <button type="submit" [disabled]="enviando() || !f.enviado_por.trim()"
+          class="rounded-lg bg-emerald-600 px-4 py-2 font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
+          {{ enviando() ? 'Enviando…' : 'Enviar' }}
+        </button>
+      </div>
+    </form>
   </div>
 }

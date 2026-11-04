@@ -1,0 +1,297 @@
+<!-- Encabezado -->
+<header class="mb-6 flex flex-wrap items-start justify-between gap-4">
+  <div class="flex items-start gap-4">
+    <div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-700">
+      <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+      </svg>
+    </div>
+    <div>
+      <h1 class="text-2xl font-semibold">Revisión de papeles de trabajo</h1>
+      <p class="mt-1 max-w-2xl text-muted">
+        Cada Excel enviado desde Conciliación queda acá hasta que alguien lo verifique a mano: que las diferencias sean reales y no errores nuestros o del equipo.
+      </p>
+    </div>
+  </div>
+  <label class="flex items-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-sm">
+    <span class="text-muted">Revisás como</span>
+    <input
+      type="text"
+      [value]="store.autor()"
+      (change)="store.fijarAutor($any($event.target).value)"
+      placeholder="Tu nombre"
+      class="w-40 font-semibold outline-none placeholder:font-normal"
+    />
+  </label>
+</header>
+
+<!-- Estados: cuántos hay en cada uno y filtro -->
+<div class="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
+  <button type="button" (click)="filtro.set('todos')"
+    class="rounded-xl border bg-white px-4 py-3 text-left transition-colors"
+    [class]="filtro() === 'todos' ? 'border-brand-600 ring-2 ring-brand-100' : 'border-line hover:border-brand-300'">
+    <p class="text-xs font-semibold tracking-wider text-muted uppercase">Todos</p>
+    <p class="mt-1 text-2xl font-semibold tabular-nums">{{ cantidades().todos }}</p>
+  </button>
+  @for (estado of ordenEstados; track estado) {
+    <button type="button" (click)="filtro.set(estado)"
+      class="rounded-xl border bg-white px-4 py-3 text-left transition-colors"
+      [class]="filtro() === estado ? 'border-brand-600 ring-2 ring-brand-100' : 'border-line hover:border-brand-300'">
+      <p class="flex items-center gap-2 text-xs font-semibold tracking-wider text-muted uppercase">
+        <span class="h-2 w-2 rounded-full" [class]="estados[estado].punto"></span>{{ estados[estado].titulo }}
+      </p>
+      <p class="mt-1 text-2xl font-semibold tabular-nums">{{ cantidades()[estado] }}</p>
+    </button>
+  }
+</div>
+
+@if (store.error(); as mensaje) {
+  <p class="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{{ mensaje }}</p>
+}
+
+<div class="grid items-start gap-5 xl:grid-cols-[20rem_minmax(0,1fr)]">
+  <!-- Bandeja -->
+  <section class="rounded-2xl border border-line bg-white">
+    <div class="border-b border-line p-3">
+      <input
+        type="search"
+        [value]="busqueda()"
+        (input)="busqueda.set($any($event.target).value)"
+        placeholder="Buscar cliente, período o persona…"
+        class="w-full rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-brand-400"
+      />
+    </div>
+    <ul class="max-h-[36rem] divide-y divide-line overflow-y-auto">
+      @for (r of visibles(); track r.id) {
+        <li>
+          <button type="button" (click)="seleccionId.set(r.id)"
+            class="w-full px-4 py-3 text-left transition-colors"
+            [class]="seleccionada()?.id === r.id ? 'bg-brand-50' : 'hover:bg-canvas'">
+            <div class="flex items-start justify-between gap-2">
+              <p class="truncate font-semibold">{{ r.empresa }}</p>
+              <span class="shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ring-1" [class]="estados[r.estado].clase">{{ estados[r.estado].corto }}</span>
+            </div>
+            <p class="mt-0.5 text-sm text-muted">
+              {{ r.periodo || 'Sin período' }} · {{ r.creado | date: 'dd/MM HH:mm' }}
+            </p>
+            <p class="mt-1.5 flex items-center gap-2 text-sm">
+              <span class="flex h-6 w-6 items-center justify-center rounded-full bg-brand-700 text-[10px] font-bold text-white">{{ iniciales(r.enviado_por) }}</span>
+              <span class="text-muted">Envió</span>
+              <span class="truncate font-semibold">{{ r.enviado_por }}</span>
+            </p>
+            <div class="mt-2 flex items-center gap-3 text-xs text-muted">
+              <span class="flex items-center gap-1.5">
+                <span class="h-1.5 w-16 overflow-hidden rounded-full bg-canvas">
+                  <span class="block h-full rounded-full bg-emerald-500" [style.width.%]="(100 * tildados(r)) / listaControles().length || 0"></span>
+                </span>
+                {{ tildados(r) }}/{{ listaControles().length }} controles
+              </span>
+              @if (abiertas(r)) {
+                <span class="font-semibold text-red-700">{{ abiertas(r) }} observación{{ abiertas(r) === 1 ? '' : 'es' }}</span>
+              }
+            </div>
+          </button>
+        </li>
+      } @empty {
+        <li class="px-4 py-10 text-center text-sm text-muted">
+          @if (store.cargando()) {
+            Cargando…
+          } @else if (store.revisiones().length) {
+            No hay revisiones con este filtro.
+          } @else {
+            Todavía no se envió nada. En Conciliación, tocá «Enviar a revisión» para mandar el papel de trabajo.
+          }
+        </li>
+      }
+    </ul>
+  </section>
+
+  <!-- Detalle de la revisión elegida -->
+  @if (seleccionada(); as r) {
+    <section class="space-y-5">
+      <div class="rounded-2xl border border-line bg-white p-6">
+        <div class="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <span class="rounded-full px-2.5 py-1 text-xs font-semibold ring-1" [class]="estados[r.estado].clase">{{ estados[r.estado].titulo }}</span>
+            <h2 class="mt-3 text-xl font-semibold">{{ r.empresa }}</h2>
+            <p class="mt-1 text-sm text-muted">
+              Período {{ r.periodo || '—' }}
+            </p>
+            <div class="mt-3 flex flex-wrap gap-3">
+              <div class="flex items-center gap-3 rounded-xl border border-brand-100 bg-brand-50 px-3 py-2">
+                <span class="flex h-9 w-9 items-center justify-center rounded-full bg-brand-700 text-sm font-bold text-white">{{ iniciales(r.enviado_por) }}</span>
+                <div class="leading-tight">
+                  <p class="text-xs font-semibold tracking-wider text-brand-700 uppercase">Lo envió</p>
+                  <p class="font-semibold">{{ r.enviado_por }}</p>
+                  <p class="text-xs text-muted">{{ r.creado | date: 'dd/MM/yyyy HH:mm' }}</p>
+                </div>
+              </div>
+              <div class="flex items-center gap-3 rounded-xl border border-line px-3 py-2">
+                <span class="flex h-9 w-9 items-center justify-center rounded-full text-sm font-bold"
+                  [class]="r.revisor ? 'bg-emerald-600 text-white' : 'border border-dashed border-line text-muted'">{{ r.revisor ? iniciales(r.revisor) : '?' }}</span>
+                <div class="leading-tight">
+                  <p class="text-xs font-semibold tracking-wider text-muted uppercase">Revisa</p>
+                  <p class="font-semibold" [class.text-muted]="!r.revisor">{{ r.revisor || 'Sin asignar' }}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <button type="button" (click)="store.descargar(r)"
+              class="flex items-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold transition-colors hover:bg-canvas">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="m7 10 5 5 5-5" /><path d="M12 15V3" /></svg>
+              Descargar Excel
+            </button>
+            @if (confirmarBorrar()) {
+              <button type="button" (click)="eliminar(r)" class="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-700">Sí, eliminar</button>
+              <button type="button" (click)="confirmarBorrar.set(false)" class="rounded-lg px-3 py-2 text-sm font-semibold text-muted hover:bg-canvas">No</button>
+            } @else {
+              <button type="button" (click)="confirmarBorrar.set(true)" title="Eliminar de la bandeja"
+                class="rounded-lg p-2 text-muted transition-colors hover:bg-red-50 hover:text-red-600">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18" /><path d="M8 6V4h8v2" /><path d="M19 6l-1 14H6L5 6" /></svg>
+              </button>
+            }
+          </div>
+        </div>
+
+        <!-- Resumen del cruce tal como se envió -->
+        <dl class="mt-5 grid grid-cols-2 gap-3 text-sm 2xl:grid-cols-4">
+          <div class="rounded-xl bg-emerald-50 px-4 py-3">
+            <dt class="text-xs font-semibold text-emerald-800">A · Conciliadas</dt>
+            <dd class="mt-1 text-lg font-semibold tabular-nums">{{ r.resumen.total_conciliados ?? 0 }}</dd>
+          </div>
+          <div class="rounded-xl bg-red-50 px-4 py-3">
+            <dt class="text-xs font-semibold text-red-800">Faltan en el Mayor</dt>
+            <dd class="mt-1 text-lg font-semibold tabular-nums">{{ r.resumen.total_faltan_en_mayor ?? 0 }}</dd>
+          </div>
+          <div class="rounded-xl bg-amber-50 px-4 py-3">
+            <dt class="text-xs font-semibold text-amber-800">Faltan en ARCA</dt>
+            <dd class="mt-1 text-lg font-semibold tabular-nums">{{ r.resumen.total_faltan_en_arca ?? 0 }}</dd>
+          </div>
+          <div class="rounded-xl bg-canvas px-4 py-3">
+            <dt class="text-xs font-semibold text-muted">Diferencia ARCA − Mayor</dt>
+            <dd class="mt-1 text-lg font-semibold tabular-nums" [class.text-red-700]="r.resumen.diferencia">
+              {{ (r.resumen.diferencia ?? 0) | currency: 'ARS' : 'symbol-narrow' }}
+            </dd>
+          </div>
+        </dl>
+      </div>
+
+      <div class="grid gap-5 2xl:grid-cols-2">
+        <!-- Controles -->
+        <div class="rounded-2xl border border-line bg-white p-6">
+          <div class="flex items-center justify-between">
+            <h3 class="font-semibold">Controles</h3>
+            <span class="text-sm text-muted tabular-nums">{{ tildados(r) }} de {{ listaControles().length }}</span>
+          </div>
+          <p class="mt-1 text-sm text-muted">Tildá cada punto a medida que lo verificás en el Excel.</p>
+          <ul class="mt-4 space-y-2">
+            @for (c of listaControles(); track c[0]) {
+              <li>
+                <label class="flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2.5 text-sm transition-colors"
+                  [class]="r.controles[c[0]] ? 'border-emerald-200 bg-emerald-50/60' : 'border-line hover:bg-canvas'">
+                  <input type="checkbox" class="mt-0.5 h-4 w-4 accent-emerald-600" [checked]="r.controles[c[0]]"
+                    [disabled]="r.estado === 'aprobado' || store.ocupada() === r.id" (change)="alternarControl(r, c[0])" />
+                  <span [class.text-muted]="r.controles[c[0]]">{{ c[1] }}</span>
+                </label>
+              </li>
+            }
+          </ul>
+        </div>
+
+        <!-- Observaciones -->
+        <div class="rounded-2xl border border-line bg-white p-6">
+          <div class="flex items-center justify-between">
+            <h3 class="font-semibold">Observaciones</h3>
+            @if (abiertas(r)) {
+              <span class="text-sm font-semibold text-red-700">{{ abiertas(r) }} sin resolver</span>
+            }
+          </div>
+          <p class="mt-1 text-sm text-muted">Si algo no cierra, anotalo y decí de quién es el error.</p>
+          <ul class="mt-4 space-y-2">
+            @for (o of r.observaciones; track o.id) {
+              <li class="rounded-lg border border-line px-3 py-2.5 text-sm" [class.opacity-60]="o.resuelta">
+                <div class="flex items-start justify-between gap-2">
+                  <p [class.line-through]="o.resuelta">{{ o.texto }}</p>
+                  <button type="button" (click)="store.resolver(r.id, o.id, !o.resuelta).subscribe()"
+                    class="shrink-0 rounded-md px-2 py-1 text-xs font-semibold transition-colors"
+                    [class]="o.resuelta ? 'text-muted hover:bg-canvas' : 'bg-emerald-600 text-white hover:bg-emerald-700'">
+                    {{ o.resuelta ? 'Reabrir' : 'Resuelta' }}
+                  </button>
+                </div>
+                <p class="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted">
+                  <span class="rounded px-1.5 py-0.5 font-semibold" [class]="origenes[o.origen].clase">{{ origenes[o.origen].titulo }}</span>
+                  {{ o.autor }} · {{ o.fecha | date: 'dd/MM HH:mm' }}
+                </p>
+              </li>
+            } @empty {
+              <li class="rounded-lg border border-dashed border-line px-3 py-4 text-center text-sm text-muted">Sin observaciones.</li>
+            }
+          </ul>
+          <form class="mt-4 space-y-2" (submit)="$event.preventDefault(); agregarObservacion(r)">
+            <textarea rows="2" [value]="textoObservacion()" (input)="textoObservacion.set($any($event.target).value)"
+              placeholder="Ej.: la retención de Banco Ejemplo está cargada dos veces en el mayor"
+              class="w-full resize-none rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-brand-400"></textarea>
+            <div class="flex flex-wrap items-center gap-2">
+              <select [value]="origenObservacion()" (change)="origenObservacion.set($any($event.target).value)"
+                class="rounded-lg border border-line bg-white px-2 py-1.5 text-sm">
+                @for (origen of ordenOrigenes; track origen) {
+                  <option [value]="origen">{{ origenes[origen].titulo }}</option>
+                }
+              </select>
+              <button type="submit" [disabled]="!textoObservacion().trim() || store.ocupada() === r.id"
+                class="ml-auto rounded-lg bg-ink px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-40">
+                Agregar observación
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- Decisión -->
+      <div class="rounded-2xl border border-line bg-white p-6">
+        <h3 class="font-semibold">Decisión</h3>
+        <textarea rows="2" [value]="comentario()" (input)="comentario.set($any($event.target).value)"
+          placeholder="Comentario para el historial (obligatorio para devolver con observaciones si no hay ninguna abierta)"
+          class="mt-3 w-full resize-none rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-brand-400"></textarea>
+        <div class="mt-3 flex flex-wrap items-center gap-2">
+          @if (r.estado === 'aprobado') {
+            <button type="button" (click)="cambiarEstado(r, 'en_revision')"
+              class="rounded-lg border border-line px-4 py-2 text-sm font-semibold hover:bg-canvas">Reabrir revisión</button>
+          } @else {
+            @if (r.estado === 'pendiente') {
+              <button type="button" (click)="cambiarEstado(r, 'en_revision')"
+                class="rounded-lg border border-line px-4 py-2 text-sm font-semibold hover:bg-canvas">Empezar revisión</button>
+            }
+            <button type="button" (click)="cambiarEstado(r, 'observado')"
+              class="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-100">Devolver con observaciones</button>
+            <button type="button" (click)="cambiarEstado(r, 'aprobado')" [disabled]="!!faltaParaAprobar(r)"
+              [title]="faltaParaAprobar(r) ?? 'Marcar como revisado y aprobado'"
+              class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40">
+              Aprobar
+            </button>
+            @if (faltaParaAprobar(r); as falta) {
+              <span class="text-sm text-muted">{{ falta }}</span>
+            }
+          }
+        </div>
+      </div>
+
+      <!-- Historial -->
+      <div class="rounded-2xl border border-line bg-white p-6">
+        <h3 class="font-semibold">Historial</h3>
+        <ol class="mt-4 space-y-3 border-l-2 border-line pl-4">
+          @for (h of r.historial.slice().reverse(); track $index) {
+            <li class="text-sm">
+              <p><span class="font-semibold">{{ h.autor }}</span> {{ accion(h.accion).toLowerCase() }}
+                <span class="text-muted">· {{ h.fecha | date: 'dd/MM/yyyy HH:mm' }}</span></p>
+              @if (h.texto) {
+                <p class="mt-0.5 text-muted">{{ h.texto }}</p>
+              }
+            </li>
+          }
+        </ol>
+      </div>
+    </section>
+  }
+</div>

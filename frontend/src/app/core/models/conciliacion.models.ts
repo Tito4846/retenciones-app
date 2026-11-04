@@ -162,3 +162,24 @@ export interface ArchivoExportado {
   blob: Blob;
   nombre: string;
 }
+
+/** Un movimiento agregado a mano en la pantalla. */
+export interface MovimientoNuevo {
+  lado: 'arca' | 'mayor';
+  fecha: string;
+  razon_social: string;
+  cuit?: string | null;
+  impuesto: string;
+  tipo: 'Retencion' | 'Percepcion';
+  /** Certificado (ARCA) o documento (mayor). */
+  comprobante?: string | null;
+  importe: number;
+}
+
+/** Lo que se manda al guardar: lo corregido (por id) y lo agregado. */
+export interface CambiosMovimientos {
+  cambios: Record<string, Partial<Record<'fecha' | 'razon_social' | 'certificado' | 'documento' | 'importe', string | number>>>;
+  nuevos: MovimientoNuevo[];
+  /** Ids de los movimientos a quitar. */
+  eliminados: string[];
+}

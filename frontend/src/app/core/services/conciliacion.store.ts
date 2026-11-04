@@ -1,7 +1,8 @@
 import { DestroyRef, Injectable, computed, inject, signal } from '@angular/core';
 import { HttpErrorResponse } from '@angular/common/http';
-import { Observable, Subscription, finalize } from 'rxjs';
+import { Observable, Subscription, catchError, finalize, map, of } from 'rxjs';
 import {
+  CambiosMovimientos,
   ConciliacionEstado,
   ConciliacionResultado,
   DetalleConciliacion,
@@ -142,6 +143,29 @@ export class ConciliacionStore {
     const taskId = this.taskId();
     if (!taskId || this.emparejando()) return;
     this.ejecutarPar(arcaId, this.conciliacionService.desemparejar(taskId, arcaId));
+  }
+
+  readonly guardando = signal(false);
+  readonly errorGuardado = signal<string | null>(null);
+
+  /** Guarda en el servidor lo editado y agregado a mano; true si salió bien. */
+  guardarMovimientos(cambios: CambiosMovimientos): Observable<boolean> {
+    const taskId = this.taskId();
+    if (!taskId || this.guardando()) return of(false);
+    this.guardando.set(true);
+    this.errorGuardado.set(null);
+    return this.conciliacionService.guardarMovimientos(taskId, cambios).pipe(
+      map((resultado) => (this.aplicarResultado(resultado), true)),
+      catchError((error: unknown) => {
+        this.errorGuardado.set(
+          error instanceof HttpErrorResponse && typeof error.error?.detail === 'string'
+            ? error.error.detail
+            : 'No se pudieron guardar los cambios. Revisá que el backend esté corriendo.',
+        );
+        return of(false);
+      }),
+      finalize(() => this.guardando.set(false)),
+    );
   }
 
   private ejecutarPar(arcaId: string, pedido: Observable<ConciliacionResultado>): void {

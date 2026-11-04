@@ -135,6 +135,51 @@ def test_emparejar_a_mano_y_deshacer(ruta_arca, ruta_mayor):
     assert len(deshecho["sugerencias"]) == 1
 
 
+def test_guardar_ediciones_y_movimientos_nuevos(ruta_arca, ruta_mayor):
+    task_id = _subir(ruta_arca, ruta_mayor).json()["task_id"]
+    estado = cliente.get(f"/api/estado/{task_id}").json()
+    (asiento,) = estado["detalle"]["faltan_en_arca"]
+    assert asiento["importe"] == 1500.0
+
+    # Se corrige el asiento sin par y se agrega en el mayor el que faltaba de los
+    # 8.300,75 de PROVEEDOR SRL: el cruce lo concilia por el certificado.
+    nuevo = cliente.post(f"/api/conciliacion/{task_id}/movimientos", json={
+        "cambios": {asiento["id"]: {"razon_social": "Proveedor SRL (corregido)", "importe": "1600"}},
+        "nuevos": [{"lado": "mayor", "fecha": "2026-10-20", "razon_social": "Proveedor SRL", "impuesto": "IVA",
+                    "tipo": "Retencion", "comprobante": "REC 0001-00009999 Cert. 77777", "importe": 8300.75}],
+    }).json()
+    assert nuevo["resumen"]["total_conciliados"] == 3
+    (editado,) = nuevo["detalle"]["faltan_en_arca"]
+    assert (editado["id"], editado["razon_social"], editado["importe"]) == (asiento["id"], "Proveedor SRL (corregido)", 1600.0)
+
+    # El Excel sale con lo guardado: el asiento nuevo al pie del mayor, conciliado.
+    libro = openpyxl.load_workbook(io.BytesIO(cliente.get(f"/api/exportar/{task_id}").content))
+    mayor = libro["LIBRO MAYOR"]
+    valores = [[c.value for c in fila] for fila in mayor.iter_rows()]
+    assert any("REC 0001-00009999 Cert. 77777" in fila for fila in valores)
+    assert any(1600.0 in fila and "Proveedor SRL (corregido)" in fila for fila in valores)
+
+    malo = cliente.post(f"/api/conciliacion/{task_id}/movimientos", json={"cambios": {asiento["id"]: {"importe": "-5"}}})
+    assert malo.status_code == 422
+
+    # Quitar el asiento sin par: B queda vacio y el Excel ya no lo tiene.
+    sin_asiento = cliente.post(f"/api/conciliacion/{task_id}/movimientos", json={"eliminados": [asiento["id"]]}).json()
+    assert sin_asiento["detalle"]["faltan_en_arca"] == []
+    assert sin_asiento["resumen"]["total_conciliados"] == 3
+    libro = openpyxl.load_workbook(io.BytesIO(cliente.get(f"/api/exportar/{task_id}").content))
+    assert not any("Proveedor SRL (corregido)" in [c.value for c in fila] for fila in libro["LIBRO MAYOR"].iter_rows())
+
+
+def test_quitar_respeta_los_pares_hechos_a_mano(ruta_arca, ruta_mayor):
+    task_id = _subir(ruta_arca, ruta_mayor).json()["task_id"]
+    (s,) = cliente.get(f"/api/estado/{task_id}").json()["sugerencias"]
+    cliente.post(f"/api/conciliacion/{task_id}/pares", json={"arca_id": s["id_arca"], "mayor_id": s["id_mayor"]})
+    # Se quita una retencion de ARCA anterior al par: el par sigue, con sus ids nuevos.
+    quitar = "a0" if s["id_arca"] != "a0" else "a1"
+    nuevo = cliente.post(f"/api/conciliacion/{task_id}/movimientos", json={"eliminados": [quitar]}).json()
+    assert nuevo["resumen"]["total_manuales"] == 1
+
+
 def test_emparejar_conciliacion_inexistente():
     respuesta = cliente.post("/api/conciliacion/no-existe/pares", json={"arca_id": "a0", "mayor_id": "m0"})
     assert respuesta.status_code == 404
