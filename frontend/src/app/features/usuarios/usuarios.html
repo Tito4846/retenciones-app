@@ -1,0 +1,142 @@
+<header class="mb-6">
+  <h1 class="text-2xl font-semibold">Usuarios</h1>
+  <p class="mt-1 max-w-2xl text-muted">
+    Quién puede entrar y qué puede hacer. El <strong>empleado</strong> prepara los lotes; el <strong>supervisor</strong> además los revisa,
+    aprueba o devuelve. Las cuentas no se borran: se dan de baja y quedan en la auditoría.
+  </p>
+</header>
+
+@if (error(); as e) {
+  <p class="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-800" role="alert">{{ e }}</p>
+}
+
+<!-- Contraseña temporal: se ve una sola vez -->
+@if (temporal(); as t) {
+  <div class="mb-5 max-w-3xl rounded-2xl border-2 border-amber-300 bg-amber-50 p-5" role="status">
+    <p class="font-semibold text-amber-900">
+      {{ t.nuevo ? 'Cuenta creada.' : 'Contraseña reseteada.' }} Contraseña temporal de {{ t.email }}:
+    </p>
+    <div class="mt-2 flex flex-wrap items-center gap-2">
+      <code class="rounded-lg bg-white px-3 py-2 font-mono text-lg tracking-wider select-all">{{ t.clave }}</code>
+      <button type="button" (click)="copiar(t.clave)" class="rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-semibold hover:bg-amber-100">
+        {{ copiada() ? '✓ Copiada' : 'Copiar' }}
+      </button>
+    </div>
+    <p class="mt-2 text-sm text-amber-900">
+      Pasásela por un medio privado (en persona o por mensaje directo, no por un grupo). Se ve <strong>una sola vez</strong>:
+      al entrar le va a pedir que elija la suya.
+    </p>
+    <button type="button" (click)="temporal.set(null)" class="mt-3 text-sm font-semibold text-amber-900 underline">Ya se la pasé</button>
+  </div>
+}
+
+<!-- Alta -->
+<form class="mb-5 flex max-w-4xl flex-wrap items-end gap-3 rounded-2xl border border-line bg-white p-5" (submit)="$event.preventDefault(); crear()">
+  <label class="min-w-[14rem] flex-1 text-sm">
+    <span class="font-semibold">Correo</span>
+    <input type="email" required maxlength="254" [value]="nuevoEmail()" (input)="nuevoEmail.set($any($event.target).value)"
+      class="mt-1 w-full rounded-lg border border-line px-3 py-2 outline-none focus:border-brand-400" placeholder="persona@estudio.com" />
+  </label>
+  <label class="min-w-[12rem] flex-1 text-sm">
+    <span class="font-semibold">Nombre</span>
+    <input type="text" required maxlength="80" [value]="nuevoNombre()" (input)="nuevoNombre.set($any($event.target).value)"
+      class="mt-1 w-full rounded-lg border border-line px-3 py-2 outline-none focus:border-brand-400" placeholder="Nombre y apellido" />
+  </label>
+  <label class="text-sm">
+    <span class="font-semibold">Rol</span>
+    <select [value]="nuevoRol()" (change)="nuevoRol.set($any($event.target).value)"
+      class="mt-1 block rounded-lg border border-line bg-white px-3 py-2 outline-none focus:border-brand-400">
+      <option value="empleado">Empleado</option>
+      <option value="supervisor">Supervisor</option>
+    </select>
+  </label>
+  <button type="submit" [disabled]="ocupado() || !nuevoEmail().trim() || !nuevoNombre().trim()"
+    class="rounded-lg bg-brand-700 px-4 py-2 font-semibold text-white hover:bg-brand-800 disabled:opacity-60">Dar de alta</button>
+</form>
+
+<!-- Lista -->
+<section class="max-w-5xl overflow-hidden rounded-2xl border border-line bg-white">
+  <div class="flex items-center justify-between border-b border-line px-5 py-3 text-sm">
+    <span class="font-semibold">{{ visibles().length }} cuenta(s)</span>
+    @if (inactivos()) {
+      <label class="flex items-center gap-2 text-muted">
+        <input type="checkbox" class="h-4 w-4 accent-brand-600" [checked]="verInactivos()" (change)="verInactivos.set(!verInactivos())" />
+        Ver dadas de baja ({{ inactivos() }})
+      </label>
+    }
+  </div>
+  <ul class="divide-y divide-line">
+    @for (c of visibles(); track c.id) {
+      <li class="px-5 py-4" [class.opacity-60]="!c.activo">
+        <div class="flex flex-wrap items-start gap-4">
+          <div class="min-w-[14rem] flex-1">
+            <p class="font-semibold">
+              {{ c.nombre }}
+              @if (c.principal) { <span class="ml-1 rounded-full bg-brand-50 px-2 py-0.5 text-xs text-brand-700">cuenta principal</span> }
+              @else if (c.gestiona_usuarios) { <span class="ml-1 rounded-full bg-brand-50 px-2 py-0.5 text-xs text-brand-700">gestiona usuarios</span> }
+              @if (c.id === sesion.cuenta()?.id) { <span class="ml-1 text-xs text-muted">(vos)</span> }
+            </p>
+            <p class="text-sm text-muted">{{ c.email }}</p>
+            <p class="mt-1 flex flex-wrap gap-2 text-xs">
+              @if (!c.activo) { <span class="rounded bg-zinc-100 px-1.5 py-0.5 text-zinc-600">Dada de baja</span> }
+              @if (c.bloqueado) { <span class="rounded bg-red-100 px-1.5 py-0.5 font-semibold text-red-700">Bloqueada por intentos</span> }
+              @if (c.debe_cambiar_clave) { <span class="rounded bg-amber-100 px-1.5 py-0.5 text-amber-800">Todavía con contraseña temporal</span> }
+              @if (c.tiene_2fa) {
+                <span class="rounded bg-emerald-50 px-1.5 py-0.5 text-emerald-700">2FA activo</span>
+              } @else if (c.exige_2fa) {
+                <span class="rounded bg-amber-100 px-1.5 py-0.5 text-amber-800">Activa el 2FA al entrar</span>
+              }
+              <span class="text-muted">Último ingreso: {{ c.ultimo_ingreso_utc ? (c.ultimo_ingreso_utc | date: 'dd/MM/yyyy HH:mm') : 'nunca' }}</span>
+            </p>
+          </div>
+
+          @if (editable(c)) {
+            <div class="flex flex-wrap items-center gap-2 text-sm">
+              @if (c.activo) {
+                <select [value]="c.rol" (change)="cambiarRol(c, $any($event.target).value)" [disabled]="ocupado()"
+                  class="rounded-lg border border-line bg-white px-2 py-1.5" aria-label="Rol">
+                  <option value="empleado">Empleado</option>
+                  <option value="supervisor">Supervisor</option>
+                </select>
+                @if (sesion.cuenta()?.principal && c.rol === 'supervisor') {
+                  <label class="flex items-center gap-1.5 rounded-lg border border-line px-2 py-1.5" title="Puede dar de alta y resetear a empleados y supervisores">
+                    <input type="checkbox" class="h-4 w-4 accent-brand-600" [checked]="c.gestiona_usuarios" [disabled]="ocupado()" (change)="alternarGestion(c)" />
+                    Gestiona usuarios
+                  </label>
+                }
+                @if (c.bloqueado) {
+                  <button type="button" (click)="desbloquear(c)" class="rounded-lg border border-line px-2 py-1.5 font-semibold hover:bg-canvas">Desbloquear</button>
+                }
+                <button type="button" (click)="confirmar.set({ cuenta: c, accion: 'clave' })" class="rounded-lg border border-line px-2 py-1.5 font-semibold hover:bg-canvas">Resetear contraseña</button>
+                @if (c.tiene_2fa) {
+                  <button type="button" (click)="confirmar.set({ cuenta: c, accion: '2fa' })" class="rounded-lg border border-line px-2 py-1.5 font-semibold hover:bg-canvas">Resetear 2FA</button>
+                }
+                <button type="button" (click)="confirmar.set({ cuenta: c, accion: 'baja' })" class="rounded-lg px-2 py-1.5 font-semibold text-muted hover:bg-canvas hover:text-red-700">Dar de baja</button>
+              } @else {
+                <button type="button" (click)="reactivar(c)" class="rounded-lg border border-line px-2 py-1.5 font-semibold hover:bg-canvas">Reactivar</button>
+              }
+            </div>
+          }
+        </div>
+
+        @if (confirmar()?.cuenta?.id === c.id) {
+          @let accion = confirmar()!.accion;
+          <div class="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <p class="min-w-[16rem] flex-1">
+              @switch (accion) {
+                @case ('clave') { Se genera una contraseña temporal nueva y se cierran sus sesiones. La actual deja de servir. }
+                @case ('2fa') { Se borra su segundo factor y se cierran sus sesiones. @if (c.exige_2fa) { Al entrar lo va a tener que registrar de nuevo. } }
+                @case ('baja') { No va a poder entrar más y se cierran sus sesiones. Lo que hizo queda en la auditoría. Se puede reactivar. }
+              }
+            </p>
+            <button type="button" (click)="confirmar.set(null)" class="px-2 font-semibold">Cancelar</button>
+            <button type="button" (click)="ejecutar()" [disabled]="ocupado()"
+              class="rounded-lg px-3 py-1.5 font-semibold text-white disabled:opacity-60" [class]="accion === 'baja' ? 'bg-red-600' : 'bg-amber-600'">
+              {{ accion === 'clave' ? 'Resetear contraseña' : accion === '2fa' ? 'Resetear 2FA' : 'Dar de baja' }}
+            </button>
+          </div>
+        }
+      </li>
+    }
+  </ul>
+</section>

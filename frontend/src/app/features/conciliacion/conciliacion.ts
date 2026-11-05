@@ -11,8 +11,9 @@ import {
   Sugerencia,
 } from '../../core/models/conciliacion.models';
 import { ConciliacionStore } from '../../core/services/conciliacion.store';
-import { EnvioRevision, Revision } from '../../core/models/revision.models';
-import { RevisionesStore } from '../../core/services/revisiones.store';
+import { NuevoLote } from '../../core/models/lote.models';
+import { LotesStore } from '../../core/services/lotes.store';
+import { SesionService } from '../../core/services/sesion.service';
 
 type Bandeja = keyof DetalleConciliacion;
 type Pestana = Bandeja | 'revisar';
@@ -560,25 +561,27 @@ export class Conciliacion {
   /** La tabla va en una caja de alto mediano; "Ver todo" la muestra entera. */
   protected readonly tablaExpandida = signal(false);
 
-  /** «Enviar a revisión»: el formulario abierto, el envío en curso y lo último enviado. */
-  private readonly revisiones = inject(RevisionesStore);
-  protected readonly envio = signal<EnvioRevision | null>(null);
+  /**
+   * «Crear lote para revisión»: arma el lote (v1) con el cruce actual, o suma
+   * una versión nueva a un lote que todavía se puede corregir.
+   */
+  protected readonly lotes = inject(LotesStore);
+  protected readonly sesion = inject(SesionService);
+  protected readonly envio = signal<(NuevoLote & { destino: string }) | null>(null);
   protected readonly enviando = signal(false);
-  protected readonly errorEnvio = signal<string | null>(null);
-  protected readonly enviada = signal<Revision | null>(null);
+  protected readonly enviada = signal<{ empresa: string; version: number } | null>(null);
+  /** Lotes a los que se les puede sumar una versión (borrador o rechazado). */
+  protected readonly lotesEditables = computed(() =>
+    this.lotes.lotes().filter((l) => l.estado === 'borrador' || l.estado === 'rechazado'),
+  );
 
   protected abrirEnvio(): void {
     const hasta = this.store.resumen()?.hasta_periodo;
-    this.errorEnvio.set(null);
-    this.envio.set({
-      empresa: '',
-      periodo: hasta ? `${hasta.slice(5, 7)}/${hasta.slice(0, 4)}` : '',
-      enviado_por: this.revisiones.autor(),
-      comentario: '',
-    });
+    this.lotes.error.set(null);
+    this.envio.set({ destino: '', empresa: '', cuit_empresa: '', periodo: hasta ? hasta.slice(0, 7) : '', comentario: '' });
   }
 
-  protected campoEnvio(campo: keyof EnvioRevision, valor: string): void {
+  protected campoEnvio(campo: keyof NuevoLote | 'destino', valor: string): void {
     this.envio.update((f) => (f ? { ...f, [campo]: valor } : f));
   }
 
@@ -587,18 +590,21 @@ export class Conciliacion {
     const taskId = this.store.taskId();
     if (!datos || !taskId || this.enviando()) return;
     this.enviando.set(true);
-    this.errorEnvio.set(null);
-    this.revisiones.enviar(taskId, datos).subscribe({
-      next: (revision) => {
-        this.enviando.set(false);
-        this.envio.set(null);
-        this.enviada.set(revision);
-      },
-      error: () => {
-        this.enviando.set(false);
-        this.errorEnvio.set('No se pudo enviar. Si la conciliación venció, volvé a traer los datos.');
-      },
-    });
+    const terminar = (empresa: string | null, version: number) => {
+      this.enviando.set(false);
+      if (empresa === null) return;
+      this.envio.set(null);
+      this.enviada.set({ empresa, version });
+    };
+    const existente = this.lotesEditables().find((l) => l.id === datos.destino);
+    if (existente) {
+      this.lotes
+        .regenerar(existente.id, taskId, existente.version_vigente)
+        .subscribe((ok) => terminar(ok ? existente.empresa : null, existente.version_vigente + 1));
+    } else {
+      const { empresa, cuit_empresa, periodo, comentario } = datos;
+      this.lotes.crear(taskId, { empresa, cuit_empresa, periodo, comentario }).subscribe((d) => terminar(d ? d.lote.empresa : null, 1));
+    }
   }
 
   protected readonly fechaCorta = fechaCorta;

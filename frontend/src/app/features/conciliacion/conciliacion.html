@@ -42,19 +42,19 @@
     <button
       type="button"
       (click)="abrirEnvio()"
-      [disabled]="!store.puedeExportar()"
-      title="Guarda el Excel en la bandeja de Revisión para que alguien lo verifique"
+      [disabled]="!store.puedeExportar() || !sesion.puedePreparar()"
+      [title]="sesion.puedePreparar() ? 'Arma el lote con este cruce para que un supervisor lo revise' : 'Tu sesión terminó: volvé a ingresar'"
       class="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
     >
       <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13" /><path d="M22 2 15 22l-4-9-9-4z" /></svg>
-      Enviar a revisión
+      Crear lote para revisión
     </button>
   </div>
 </header>
 
 @if (enviada(); as e) {
   <p class="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-800">
-    Enviado a revisión: <strong>{{ e.empresa }}</strong> quedó como «Falta revisión».
+    Lote de <strong>{{ e.empresa }}</strong> con la v{{ e.version }} en borrador: justificá las partidas y envialo desde Revisión.
     <a routerLink="/revision" class="font-semibold underline">Ir a Revisión</a>
     <button type="button" (click)="enviada.set(null)" class="ml-auto text-emerald-700/70 hover:text-emerald-900" aria-label="Cerrar">✕</button>
   </p>
@@ -1134,40 +1134,61 @@
       aria-labelledby="titulo-envio"
     >
       <div class="border-b border-line px-6 py-4">
-        <h3 id="titulo-envio" class="text-lg font-semibold">Enviar a revisión</h3>
-        <p class="mt-1 text-sm text-muted">Se genera el papel de trabajo con lo guardado y queda en la bandeja como «Falta revisión».</p>
+        <h3 id="titulo-envio" class="text-lg font-semibold">Crear lote para revisión</h3>
+        <p class="mt-1 text-sm text-muted">
+          Se genera el papel de trabajo con el estado de cada partida. Queda en borrador hasta que lo justifiques y lo envíes; después lo revisa otra persona.
+        </p>
       </div>
       <div class="grid gap-4 px-6 py-5 sm:grid-cols-2">
-        <label class="text-sm">
-          <span class="font-semibold">Período</span>
-          <input type="text" [value]="f.periodo" (input)="campoEnvio('periodo', $any($event.target).value)"
-            class="mt-1 w-full rounded-lg border border-line px-3 py-2 outline-none focus:border-brand-400" placeholder="10/2026" />
-        </label>
-        <label class="text-sm">
-          <span class="font-semibold">Lo envía</span>
-          <input type="text" [value]="f.enviado_por" (input)="campoEnvio('enviado_por', $any($event.target).value)"
-            class="mt-1 w-full rounded-lg border border-line px-3 py-2 outline-none focus:border-brand-400" placeholder="Tu nombre" />
-        </label>
-        <label class="text-sm sm:col-span-2">
-          <span class="font-semibold">Comentario para quien revisa</span> <span class="text-muted">(opcional)</span>
-          <textarea rows="2" [value]="f.comentario" (input)="campoEnvio('comentario', $any($event.target).value)"
-            class="mt-1 w-full resize-none rounded-lg border border-line px-3 py-2 outline-none focus:border-brand-400"
-            placeholder="Ej.: revisar las dos retenciones de Proveedor SRL"></textarea>
-        </label>
+        @if (lotesEditables().length) {
+          <label class="text-sm sm:col-span-2">
+            <span class="font-semibold">Destino</span>
+            <select [value]="f.destino" (change)="campoEnvio('destino', $any($event.target).value)"
+              class="mt-1 w-full rounded-lg border border-line bg-white px-3 py-2 outline-none focus:border-brand-400">
+              <option value="">Lote nuevo</option>
+              @for (l of lotesEditables(); track l.id) {
+                <option [value]="l.id">Versión nueva de {{ l.empresa }} {{ l.periodo }} (hoy v{{ l.version_vigente }}, {{ l.estado }})</option>
+              }
+            </select>
+          </label>
+        }
+        @if (!f.destino) {
+          <label class="text-sm">
+            <span class="font-semibold">Cliente</span>
+            <input type="text" [value]="f.empresa" (input)="campoEnvio('empresa', $any($event.target).value)"
+              class="mt-1 w-full rounded-lg border border-line px-3 py-2 outline-none focus:border-brand-400" placeholder="Razón social" />
+          </label>
+          <label class="text-sm">
+            <span class="font-semibold">CUIT del cliente</span>
+            <input type="text" [value]="f.cuit_empresa" (input)="campoEnvio('cuit_empresa', $any($event.target).value)"
+              class="mt-1 w-full rounded-lg border border-line px-3 py-2 outline-none focus:border-brand-400" placeholder="30-12345678-9" />
+          </label>
+          <label class="text-sm">
+            <span class="font-semibold">Período</span>
+            <input type="month" [value]="f.periodo" (input)="campoEnvio('periodo', $any($event.target).value)"
+              class="mt-1 w-full rounded-lg border border-line px-3 py-2 outline-none focus:border-brand-400" />
+          </label>
+          <label class="text-sm sm:col-span-2">
+            <span class="font-semibold">Comentario</span> <span class="text-muted">(opcional, queda en la auditoría)</span>
+            <textarea rows="2" [value]="f.comentario" (input)="campoEnvio('comentario', $any($event.target).value)"
+              class="mt-1 w-full resize-none rounded-lg border border-line px-3 py-2 outline-none focus:border-brand-400"
+              placeholder="Ej.: revisar las dos retenciones de Proveedor SRL"></textarea>
+          </label>
+        }
         @if (pendientes()) {
           <p class="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 sm:col-span-2">
-            Tenés {{ pendientes() }} cambio(s) sin guardar: no van en el Excel hasta que toques «Guardar cambios».
+            Tenés {{ pendientes() }} cambio(s) sin guardar: no van en el lote hasta que toques «Guardar cambios».
           </p>
         }
-        @if (errorEnvio(); as mensaje) {
-          <p class="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 sm:col-span-2">{{ mensaje }}</p>
+        @if (lotes.error(); as e) {
+          <p class="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 sm:col-span-2">{{ e.mensaje }}</p>
         }
       </div>
       <div class="flex justify-end gap-2 border-t border-line bg-canvas/40 px-6 py-3">
         <button type="button" (click)="envio.set(null)" class="rounded-lg px-4 py-2 font-semibold text-muted hover:bg-canvas">Cancelar</button>
-        <button type="submit" [disabled]="enviando() || !f.enviado_por.trim()"
+        <button type="submit" [disabled]="enviando() || (!f.destino && (!f.empresa.trim() || !f.periodo))"
           class="rounded-lg bg-emerald-600 px-4 py-2 font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
-          {{ enviando() ? 'Enviando…' : 'Enviar' }}
+          {{ enviando() ? 'Generando…' : f.destino ? 'Sumar versión' : 'Crear lote' }}
         </button>
       </div>
     </form>

@@ -19,6 +19,10 @@ dependencies = [
     "playwright>=1.40.0",
     # pandas.read_html: la tabla de resultados de Mis Retenciones.
     "lxml>=5.0.0",
+    "argon2-cffi>=23.1.0",
+    "pyjwt>=2.9.0",
+    "cryptography>=43.0.0",
+    "segno>=1.6.0",
 ]
 
 [dependency-groups]
@@ -30,3 +34,4 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = ["login_real: usa el ingreso de verdad (sin el usuario simulado de los tests)"]

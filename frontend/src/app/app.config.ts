@@ -1,9 +1,10 @@
-import { ApplicationConfig, LOCALE_ID, provideBrowserGlobalErrorListeners } from '@angular/core';
+import { ApplicationConfig, LOCALE_ID, inject, provideAppInitializer, provideBrowserGlobalErrorListeners } from '@angular/core';
 import { registerLocaleData } from '@angular/common';
-import { provideHttpClient, withXhr } from '@angular/common/http';
+import { provideHttpClient, withInterceptors, withXhr } from '@angular/common/http';
 import localeEsAr from '@angular/common/locales/es-AR';
 import { provideRouter } from '@angular/router';
 import { routes } from './app.routes';
+import { SesionService, sesionInterceptor } from './core/services/sesion.service';
 
 registerLocaleData(localeEsAr);
 
@@ -12,7 +13,9 @@ export const appConfig: ApplicationConfig = {
     provideBrowserGlobalErrorListeners(),
     provideRouter(routes),
     // XHR (no fetch) para poder reportar el progreso de subida de archivos.
-    provideHttpClient(withXhr()),
+    provideHttpClient(withXhr(), withInterceptors([sesionInterceptor])),
+    // Antes de la primera pantalla: si hay una sesión viva (cookie), se retoma.
+    provideAppInitializer(() => inject(SesionService).iniciar()),
     { provide: LOCALE_ID, useValue: 'es-AR' },
   ]
 };
