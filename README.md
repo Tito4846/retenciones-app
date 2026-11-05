@@ -138,7 +138,7 @@ los motivos y marca en rojo las filas responsables en el detalle.
 
 El diseño completo está en [docs/diseno-revision.md](docs/diseno-revision.md). En resumen:
 
-- Desde **Conciliación**, el empleado toca «Crear lote para revisión»: se genera la v1 del lote con
+- Desde **Conciliación**, el empleado toca «Generar Lote para Revisión» y confirma (cliente, CUIT y período salen del cruce; con archivos subidos a mano se escribe solo lo que falta): se genera la v1 del lote con
   cada partida clasificada (Conciliado Automático, Diferencia de Monto, Pendiente de Comprobante,
   No Localizado en ERP / en Fisco) y un código de discrepancia. El Excel suma las hojas
   `CONCILIACION` (protegida: solo se editan Justificación y Comentario) y `_META` (oculta).

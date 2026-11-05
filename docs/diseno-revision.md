@@ -49,7 +49,7 @@ al anterior (`lote.rectifica_a`), así el aprobado original queda intacto.
 1. **Conciliación (motor).** El empleado importa ARCA + Libro Mayor (o los trae
    con los bots) y corre el cruce. Cada partida sale con estado inicial y código
    de discrepancia (ver §1.3).
-2. **Crear lote.** `POST /lotes` con el `task_id` del cruce. Se guarda:
+2. **Crear lote.** `POST /lotes` con el `task_id` del cruce. Cliente, CUIT y período salen del resumen del cruce (los bots los saben; con archivos subidos a mano solo se conoce el período y el resto se escribe al confirmar). Si ya hay un lote corregible de ese cliente y período, la pantalla pide `regenerar` en vez de crear. Se guarda:
    - la versión **v1** (Excel generado, `origen = generado`, SHA-256);
    - las partidas normalizadas de esa versión;
    - el **snapshot de totales de las fuentes** (total del libro de retenciones del

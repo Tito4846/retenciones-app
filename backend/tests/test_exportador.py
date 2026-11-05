@@ -5,7 +5,7 @@ from datetime import date
 
 import openpyxl
 
-from app.services import exportador
+from app.services import exportador, tareas
 from app.services.importador_mayor import leer_mayor_desde_webreport
 from app.services.tareas import Entrada, _cruzar
 
@@ -41,3 +41,12 @@ def test_texto_que_empieza_con_igual_no_es_formula():
     hoja = _libro(None)
     assert hoja["E3"].value == "=Cobro noviembre"
     assert hoja["E3"].data_type == "s"
+
+
+def test_el_cliente_que_saben_los_bots_sigue_despues_de_editar():
+    task_id = tareas.crear()
+    tareas.procesar_con(task_id, lambda: (ARCA, leer_mayor_desde_webreport(WEBREPORT)), date(2026, 10, 31),
+                        identidad=lambda: ("Piccinini SA", "30711111119"))
+    assert tareas.obtener(task_id).status == "completado"
+    resumen = tareas.guardar_cambios(task_id, {}, [], [])["resumen"]
+    assert (resumen["empresa"], resumen["cuit_empresa"], resumen["periodo"]) == ("Piccinini SA", "30-71111111-9", "2026-10")

@@ -30,6 +30,8 @@ export interface Retencion {
   documento?: string | null;
   cuenta?: string | null;
   descripcion?: string | null;
+  /** Solo en conciliados: por qué el par no es exacto y hay que justificarlo. */
+  observacion?: string | null;
   /** Solo en conciliados: por qué se emparejó y con qué asiento. */
   criterio?: CriterioConciliacion;
   id_mayor?: string;
@@ -63,6 +65,14 @@ export interface ResumenConciliacion {
   hasta_periodo?: string | null;
   /** Filas del Haber (aplicaciones a la DDJJ): no participan del cruce. */
   aplicaciones_mayor?: number;
+  /** De quién es: los bots lo saben, los archivos subidos a mano no ("" si no se sabe). */
+  empresa?: string;
+  cuit_empresa?: string;
+  /** AAAA-MM. */
+  periodo?: string;
+  /** Las mismas cuentas con que se arma el lote: cuadran solas o piden justificación. */
+  partidas_exactas?: number;
+  partidas_a_revisar?: number;
   /** Por qué la diferencia no da 0; sumados dan `diferencia`. Vacío si da 0. */
   motivos_diferencia?: MotivoDiferencia[];
 }

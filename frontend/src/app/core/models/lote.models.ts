@@ -83,6 +83,8 @@ export interface LoteListado extends Lote {
 export interface ResumenVersion {
   partidas?: number;
   por_estado?: Record<string, number>;
+  /** Las que no concilian solas y siguen en el lote (versiones viejas no lo traen). */
+  excepciones?: number;
   importe_fisco?: string;
   importe_erp?: string;
   /** Con ajustes y sin las filas quitadas. Las versiones viejas no los tienen. */

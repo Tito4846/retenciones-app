@@ -1,6 +1,6 @@
 import { CurrencyPipe, DatePipe, NgTemplateOutlet, PercentPipe } from '@angular/common';
 import { Component, ElementRef, computed, effect, inject, linkedSignal, signal, untracked, viewChild } from '@angular/core';
-import { Router, RouterLink } from '@angular/router';
+import { Router } from '@angular/router';
 import {
   CambiosMovimientos,
   CriterioConciliacion,
@@ -14,6 +14,7 @@ import { ConciliacionStore } from '../../core/services/conciliacion.store';
 import { NuevoLote } from '../../core/models/lote.models';
 import { LotesStore } from '../../core/services/lotes.store';
 import { SesionService } from '../../core/services/sesion.service';
+import { periodo } from '../revision/revision.util';
 
 type Bandeja = keyof DetalleConciliacion;
 type Pestana = Bandeja | 'revisar';
@@ -79,9 +80,6 @@ const PESTANAS: readonly PestanaConfig[] = [
   },
 ];
 
-/** Casos de B y C que se muestran de entrada (el detalle completo está en cada pestaña y en el Excel). */
-const CASOS_EN_RESUMEN = 10;
-
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 const PESOS = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' });
 
@@ -129,6 +127,10 @@ function armarAviso(movs: Retencion[]): string {
   ].join('\n');
 }
 
+function digitos(texto: string): string {
+  return texto.replace(/\D/g, '');
+}
+
 function normalizar(texto: string | null | undefined): string {
   return (texto ?? '')
     .normalize('NFD')
@@ -138,7 +140,7 @@ function normalizar(texto: string | null | undefined): string {
 
 @Component({
   selector: 'app-conciliacion',
-  imports: [CurrencyPipe, DatePipe, NgTemplateOutlet, PercentPipe, RouterLink],
+  imports: [CurrencyPipe, DatePipe, NgTemplateOutlet, PercentPipe],
   templateUrl: './conciliacion.html',
   // El embudo está fijo en la pantalla: si la página se mueve, se mueve con su columna.
   host: { '(window:scroll)': 'ubicarFiltro()', '(window:resize)': 'ubicarFiltro()' },
@@ -147,19 +149,19 @@ export class Conciliacion {
   protected readonly store = inject(ConciliacionStore);
   private readonly router = inject(Router);
 
-  protected readonly pestanas = PESTANAS;
-  protected readonly casosEnResumen = CASOS_EN_RESUMEN;
+  /** A, B y C: cada tarjeta filtra la tabla. */
+  protected readonly tarjetas = PESTANAS.filter((p) => p.letra);
+  protected readonly periodo = periodo;
 
-  /** Los primeros casos de B y C: lo que hay que reclamar y lo que hay que ajustar. */
-  protected readonly primerosCasos = computed(() => {
-    const d = this.store.detalle();
-    if (!d) return [];
-    return (['faltan_en_arca', 'faltan_en_mayor'] as const).map((id) => ({
-      config: PESTANAS.find((p) => p.id === id)!,
-      filas: d[id].slice(0, CASOS_EN_RESUMEN).map(this.conEdicion),
-      total: d[id].length,
-    }));
-  });
+  /** Pares del cruce que igual hay que justificar: están con los conciliados, marcados. */
+  protected readonly paresObservados = computed(() => (this.store.detalle()?.conciliados ?? []).filter((f) => f.observacion).length);
+  /** Las columnas de la tabla, para las filas que las ocupan todas. */
+  protected readonly columnas = computed(() => (this.pestanaActiva() === 'faltan_en_mayor' ? 9 : 8));
+
+  /** ARCA identifica con el certificado; el mayor, con el documento del asiento. */
+  protected comprobante(item: Retencion): string {
+    return (this.pestanaActiva() === 'faltan_en_arca' ? item.documento : item.certificado) || '—';
+  }
 
   /** Sugerencias que la persona descartó en esta pantalla (no se mandan al servidor). */
   private readonly descartadas = signal<Set<string>>(new Set());
@@ -420,7 +422,7 @@ export class Conciliacion {
       .filter(
         (f) =>
           !texto ||
-          [f.cuit, f.cuit.replace(/\D/g, ''), f.razon_social, f.certificado, f.documento, f.documento_mayor, f.descripcion, f.cuenta, String(f.importe), PESOS.format(f.importe), fechaCorta(f.fecha)]
+          [f.cuit, f.cuit.replace(/\D/g, ''), f.razon_social, f.impuesto, f.certificado, f.documento, f.documento_mayor, f.descripcion, f.cuenta, String(f.importe), PESOS.format(f.importe), fechaCorta(f.fecha)]
             .some((v) => normalizar(v).includes(texto)),
       )
       .sort((a, b) => {
@@ -562,26 +564,42 @@ export class Conciliacion {
   protected readonly tablaExpandida = signal(false);
 
   /**
-   * «Crear lote para revisión»: arma el lote (v1) con el cruce actual, o suma
-   * una versión nueva a un lote que todavía se puede corregir.
+   * «Generar Lote para Revisión»: se confirma, no se completa. Cliente, CUIT y
+   * período salen del cruce; solo se escribe lo que los archivos subidos a mano
+   * no dicen. Si ya hay un lote corregible de ese cliente y período, suma una versión.
    */
   protected readonly lotes = inject(LotesStore);
   protected readonly sesion = inject(SesionService);
-  protected readonly envio = signal<(NuevoLote & { destino: string }) | null>(null);
+  protected readonly envio = signal<Omit<NuevoLote, 'comentario'> | null>(null);
   protected readonly enviando = signal(false);
-  protected readonly enviada = signal<{ empresa: string; version: number } | null>(null);
-  /** Lotes a los que se les puede sumar una versión (borrador o rechazado). */
-  protected readonly lotesEditables = computed(() =>
-    this.lotes.lotes().filter((l) => l.estado === 'borrador' || l.estado === 'rechazado'),
-  );
+
+  protected readonly identidad = computed(() => {
+    const r = this.store.resumen();
+    return { empresa: r?.empresa ?? '', cuit_empresa: r?.cuit_empresa ?? '', periodo: r?.periodo ?? '' };
+  });
+
+  protected readonly loteExistente = computed(() => {
+    const f = this.envio();
+    if (!f) return null;
+    const cuit = digitos(f.cuit_empresa);
+    const empresa = normalizar(f.empresa.trim());
+    return (
+      this.lotes.lotes().find(
+        (l) =>
+          (l.estado === 'borrador' || l.estado === 'rechazado') &&
+          l.periodo === f.periodo &&
+          (cuit && l.cuit_empresa ? digitos(l.cuit_empresa) === cuit : normalizar(l.empresa) === empresa),
+      ) ?? null
+    );
+  });
 
   protected abrirEnvio(): void {
-    const hasta = this.store.resumen()?.hasta_periodo;
     this.lotes.error.set(null);
-    this.envio.set({ destino: '', empresa: '', cuit_empresa: '', periodo: hasta ? hasta.slice(0, 7) : '', comentario: '' });
+    this.lotes.cargar();
+    this.envio.set(this.identidad());
   }
 
-  protected campoEnvio(campo: keyof NuevoLote | 'destino', valor: string): void {
+  protected campoEnvio(campo: 'empresa' | 'cuit_empresa' | 'periodo', valor: string): void {
     this.envio.update((f) => (f ? { ...f, [campo]: valor } : f));
   }
 
@@ -590,20 +608,17 @@ export class Conciliacion {
     const taskId = this.store.taskId();
     if (!datos || !taskId || this.enviando()) return;
     this.enviando.set(true);
-    const terminar = (empresa: string | null, version: number) => {
+    const irAlLote = (id: string | null) => {
       this.enviando.set(false);
-      if (empresa === null) return;
+      if (!id) return;
       this.envio.set(null);
-      this.enviada.set({ empresa, version });
+      this.router.navigate(['/revision'], { queryParams: { lote: id } });
     };
-    const existente = this.lotesEditables().find((l) => l.id === datos.destino);
+    const existente = this.loteExistente();
     if (existente) {
-      this.lotes
-        .regenerar(existente.id, taskId, existente.version_vigente)
-        .subscribe((ok) => terminar(ok ? existente.empresa : null, existente.version_vigente + 1));
+      this.lotes.regenerar(existente.id, taskId, existente.version_vigente).subscribe((ok) => irAlLote(ok ? existente.id : null));
     } else {
-      const { empresa, cuit_empresa, periodo, comentario } = datos;
-      this.lotes.crear(taskId, { empresa, cuit_empresa, periodo, comentario }).subscribe((d) => terminar(d ? d.lote.empresa : null, 1));
+      this.lotes.crear(taskId, { ...datos, comentario: '' }).subscribe((d) => irAlLote(d?.lote.id ?? null));
     }
   }
 

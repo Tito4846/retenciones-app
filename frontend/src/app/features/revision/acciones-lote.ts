@@ -69,7 +69,7 @@ const SIN_AUTOAPROBACION = 'No podés aprobar un lote que vos mismo preparaste';
           <span [title]="trabasEnviar().join('\\n')">
             <button type="button" (click)="enviar()" [disabled]="store.ocupado() || trabasEnviar().length > 0"
               class="rounded-lg bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-50">
-              {{ lote.estado === 'rechazado' ? 'Reenviar a revisión' : 'Enviar a revisión' }}
+              {{ lote.estado === 'rechazado' ? 'Reenviar a Revisión' : 'Enviar a Revisión' }}
             </button>
           </span>
         }
@@ -83,12 +83,12 @@ const SIN_AUTOAPROBACION = 'No podés aprobar un lote que vos mismo preparaste';
         }
         @if (p.revisar) {
           <button type="button" (click)="devolver()" [disabled]="store.ocupado()"
-            class="rounded-lg border border-red-300 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50">Devolver para corregir</button>
+            class="rounded-lg border border-red-300 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50">Devolver para Corregir</button>
         }
         @if (p.revisar || p.autor) {
           <span [title]="p.autor ? sinAutoaprobacion : trabasAprobar().join('\\n')">
             <button type="button" (click)="confirmar.set('aprobar')" [disabled]="store.ocupado() || p.autor || trabasAprobar().length > 0"
-              class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50">Aprobar y cerrar lote</button>
+              class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50">Aprobar y Cerrar Lote</button>
           </span>
         }
       </div>

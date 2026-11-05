@@ -30,7 +30,7 @@ const CAMPOS: Record<string, string> = {
           <p class="font-semibold">Este lote viene de la bandeja anterior y no tiene partidas.</p>
           <p class="mt-1 text-muted">
             Abrí su conciliación en <a routerLink="/conciliacion" class="font-semibold text-brand-700 underline">Conciliación</a>,
-            tocá «Crear lote para revisión» y elegí «Versión nueva de {{ det.lote.empresa }}».
+            tocá «Generar Lote para Revisión»: si es del mismo cliente y período, se suma a este lote.
           </p>
         } @else {
           <p class="font-semibold">¿Preferís trabajar en Excel?</p>

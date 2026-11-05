@@ -13,14 +13,16 @@ import threading
 import time
 import uuid
 from collections.abc import Callable
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date
 
+from app.services import partidas
 from app.services.conciliador import conciliar_retenciones
 from app.services.importador_arca import leer_arca
 from app.services.importador_mayor import LecturaMayor, leer_mayor
 from app.services.importador_tablas import columna_canonica
-from app.services.tools import ErrorDeLectura, OperacionCancelada, normalizar_cuit, parse_fecha
+from app.services.tools import ErrorDeLectura, OperacionCancelada, formatear_cuit, normalizar_cuit, parse_fecha
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +53,9 @@ class Entrada:
     arca: list[dict]
     mayor: LecturaMayor
     hasta_periodo: date | None
+    # De quién es la conciliación, si se sabe (los archivos subidos no lo dicen).
+    empresa: str = ""
+    cuit_empresa: str = ""
 
 
 _tareas: dict[str, Tarea] = {}
@@ -140,11 +145,13 @@ def procesar_con(
     task_id: str,
     cargar: Callable[[], tuple[list[dict], LecturaMayor]],
     hasta_periodo: date | None = None,
+    identidad: Callable[[], tuple[str, str]] | None = None,
 ) -> None:
     """
     Corre `cargar` (archivos subidos o bots de las conexiones), cruza y deja
     el resultado en la tarea. Los errores de lectura llegan a la pantalla tal
     cual; cualquier otro, con un mensaje generico y el detalle en el log.
+    `identidad` da (empresa, CUIT) al terminar la carga: los bots recien ahi la saben.
     """
     _terminar(task_id, status="procesando")
     try:
@@ -152,7 +159,8 @@ def procesar_con(
         if cancelada(task_id):
             return
         avanzar(task_id, "cruce", "Cruzando las retenciones de ARCA con el Libro Mayor…")
-        entrada = Entrada(arca, mayor, hasta_periodo)
+        empresa, cuit_empresa = identidad() if identidad else ("", "")
+        entrada = Entrada(arca, mayor, hasta_periodo, empresa, formatear_cuit(cuit_empresa))
         _terminar(task_id, status="completado", entrada=entrada, resultado=_cruzar(entrada, {}))
     except OperacionCancelada:
         pass  # el estado ya dice «cancelado»
@@ -163,6 +171,15 @@ def procesar_con(
         _terminar(task_id, status="error", mensaje="Error inesperado al procesar los datos.")
 
 
+def _periodo(entrada: Entrada) -> str:
+    """AAAA-MM: el mes consultado o, con archivos subidos, el de la mayoría de las filas."""
+    if entrada.hasta_periodo:
+        return entrada.hasta_periodo.strftime("%Y-%m")
+    fechas = [parse_fecha(f.get("fecha")) for f in entrada.arca or entrada.mayor.retenciones]
+    meses = Counter(f.strftime("%Y-%m") for f in fechas if f)
+    return meses.most_common(1)[0][0] if meses else ""
+
+
 def _cruzar(entrada: Entrada, manuales: dict[int, int]) -> dict:
     resultado = conciliar_retenciones(
         entrada.arca,
@@ -170,7 +187,13 @@ def _cruzar(entrada: Entrada, manuales: dict[int, int]) -> dict:
         hasta_periodo=entrada.hasta_periodo,
         pares_manuales=manuales,
     )
-    resultado["resumen"]["aplicaciones_mayor"] = len(entrada.mayor.aplicaciones)
+    resultado["resumen"].update(
+        aplicaciones_mayor=len(entrada.mayor.aplicaciones),
+        empresa=entrada.empresa,
+        cuit_empresa=entrada.cuit_empresa,
+        periodo=_periodo(entrada),
+        **partidas.marcar_exactos(resultado, entrada),
+    )
     return resultado
 
 
@@ -322,7 +345,8 @@ def guardar_cambios(task_id: str, cambios: dict[str, dict], nuevos: list[dict], 
         retenciones = [m for j, m in enumerate(retenciones) if j in nuevo_mayor]
         manuales = {nuevo_arca[i]: nuevo_mayor[j] for i, j in tarea.manuales.items() if i in nuevo_arca and j in nuevo_mayor}
 
-        nueva = Entrada(arca, entrada.mayor._replace(retenciones=retenciones), entrada.hasta_periodo)
+        nueva = Entrada(arca, entrada.mayor._replace(retenciones=retenciones), entrada.hasta_periodo,
+                        entrada.empresa, entrada.cuit_empresa)
         tarea.resultado = _cruzar(nueva, manuales)
         tarea.entrada = nueva
         tarea.manuales = manuales

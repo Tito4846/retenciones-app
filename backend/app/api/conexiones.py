@@ -154,6 +154,7 @@ def conciliar(background: BackgroundTasks, periodo: Periodo | None = None) -> di
         tareas.procesar_con,
         task_id,
         lambda: conexiones.cargar_desde_conexiones(periodo.desde, periodo.hasta),
+        identidad=lambda: (conexiones.xubio.estado()["empresa_activa"] or "", ""),
     )
     return {"task_id": task_id}
 
@@ -184,5 +185,6 @@ def automatico(background: BackgroundTasks, consulta: ConsultaMisRetenciones) ->
             cancelada=lambda: tareas.cancelada(task_id),
         ),
         hasta_periodo=consulta.hasta,
+        identidad=lambda: (conexiones.xubio.estado()["empresa_activa"] or "", consulta.cuit_retenido),
     )
     return {"task_id": task_id}

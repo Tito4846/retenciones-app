@@ -1,64 +1,22 @@
-<!-- Encabezado y acciones -->
-<header class="mb-6 flex flex-wrap items-start justify-between gap-4">
-  <div class="flex items-start gap-4">
-    <div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-700">
-      <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M21 12a9 9 0 0 0-15-6.7L3 8" /><path d="M3 3v5h5" /><path d="M3 12a9 9 0 0 0 15 6.7l3-2.7" /><path d="M21 21v-5h-5" />
-      </svg>
-    </div>
-    <div>
-      <h1 class="text-2xl font-semibold">Conciliación de retenciones</h1>
+<!-- Encabezado -->
+<header class="mb-6 flex flex-wrap items-center justify-between gap-4">
+  <div class="min-w-0">
+    <h1 class="text-2xl font-semibold">Conciliación de retenciones</h1>
+    @if (store.resumen(); as r) {
       <p class="mt-1 text-muted">
-        Mis Retenciones de ARCA contra el Libro Mayor de Xubio: cruce por número de comprobante y, si no cruza, por CUIT del agente + importe.
-        @if (store.resumen(); as r) {
-          <span class="whitespace-nowrap">
-            Tolerancia de {{ r.tolerancia_dias }} días{{ r.hasta_periodo ? ' · período hasta el ' + (r.hasta_periodo | date: 'dd/MM/yyyy') : '' }}.
-          </span>
-        }
+        @if (r.empresa) { {{ r.empresa }} · }@if (r.cuit_empresa) { CUIT {{ r.cuit_empresa }} · }{{ periodo(r.periodo ?? '') }}
       </p>
-    </div>
+    }
   </div>
-
-  <div class="flex flex-wrap items-center gap-3">
-    <button
-      type="button"
-      (click)="importarOtros()"
-      [disabled]="store.ocupado()"
-      class="rounded-lg border border-line bg-white px-4 py-2.5 font-semibold transition-colors hover:bg-canvas disabled:opacity-50"
-    >
-      Nueva conciliación
-    </button>
-    <button
-      type="button"
-      (click)="store.exportar()"
-      [disabled]="!store.puedeExportar()"
-      class="flex items-center gap-2 rounded-lg bg-brand-700 px-4 py-2.5 font-semibold text-white shadow-sm transition-colors hover:bg-brand-800 disabled:cursor-not-allowed disabled:bg-brand-400"
-    >
-      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="m7 10 5 5 5-5" /><path d="M12 15V3" />
-      </svg>
-      {{ store.exportando() ? 'Generando Excel…' : 'Exportar papel de trabajo' }}
-    </button>
-    <button
-      type="button"
-      (click)="abrirEnvio()"
-      [disabled]="!store.puedeExportar() || !sesion.puedePreparar()"
-      [title]="sesion.puedePreparar() ? 'Arma el lote con este cruce para que un supervisor lo revise' : 'Tu sesión terminó: volvé a ingresar'"
-      class="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
-    >
-      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13" /><path d="M22 2 15 22l-4-9-9-4z" /></svg>
-      Crear lote para revisión
-    </button>
-  </div>
+  <button
+    type="button"
+    (click)="importarOtros()"
+    [disabled]="store.ocupado()"
+    class="rounded-lg border border-line bg-white px-4 py-2.5 font-semibold transition-colors hover:bg-canvas disabled:opacity-50"
+  >
+    Nueva conciliación
+  </button>
 </header>
-
-@if (enviada(); as e) {
-  <p class="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-800">
-    Lote de <strong>{{ e.empresa }}</strong> con la v{{ e.version }} en borrador: justificá las partidas y envialo desde Revisión.
-    <a routerLink="/revision" class="font-semibold underline">Ir a Revisión</a>
-    <button type="button" (click)="enviada.set(null)" class="ml-auto text-emerald-700/70 hover:text-emerald-900" aria-label="Cerrar">✕</button>
-  </p>
-}
 
 @if (store.errorExportacion(); as mensaje) {
   <p class="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{{ mensaje }}</p>
@@ -76,324 +34,72 @@
     </section>
   }
 
-  <!-- Control ARCA vs. Libro Mayor -->
-  <section class="mb-6 rounded-2xl border border-line bg-white p-6">
-    <div class="grid gap-6 md:grid-cols-3">
-      <div>
-        <p class="text-sm text-muted">Informado en ARCA</p>
-        <p class="mt-1 text-2xl font-semibold tabular-nums">{{ r.importe_arca ?? 0 | currency: 'ARS' : 'symbol-narrow' }}</p>
-        <p class="mt-0.5 text-sm text-muted">{{ r.total_arca }} retenciones</p>
-      </div>
-      <div>
-        <p class="text-sm text-muted">Registrado en el Libro Mayor de Xubio</p>
-        <p class="mt-1 text-2xl font-semibold tabular-nums">{{ r.importe_mayor ?? 0 | currency: 'ARS' : 'symbol-narrow' }}</p>
-        <p class="mt-0.5 text-sm text-muted">
-          {{ r.total_mayor }} asientos
-          @if (r.aplicaciones_mayor) {
-            · {{ r.aplicaciones_mayor }} aplicaciones (Haber) fuera del cruce
-          }
-        </p>
-      </div>
-      <div>
-        <p class="text-sm text-muted">Diferencia ARCA − Mayor</p>
-        @let dif = r.diferencia ?? 0;
-        <p class="mt-1 text-2xl font-semibold tabular-nums" [class]="dif === 0 ? 'text-emerald-700' : 'text-red-600'">
-          {{ dif | currency: 'ARS' : 'symbol-narrow' }}
-        </p>
-        <p class="mt-0.5 text-sm" [class]="dif === 0 ? 'text-emerald-700' : 'text-muted'">
-          @if (dif === 0) {
-            ✓ Los dos lados coinciden
-          } @else if (dif > 0) {
-            ARCA informa más de lo registrado
-          } @else {
-            El Libro Mayor tiene más de lo que informa ARCA
-          }
-        </p>
-      </div>
+  <!-- Resumen financiero -->
+  @let dif = r.diferencia ?? 0;
+  <section class="mb-6 grid divide-y divide-line rounded-2xl border border-line bg-white md:grid-cols-3 md:divide-x md:divide-y-0">
+    <div class="p-6">
+      <p class="text-sm text-muted">Informado en ARCA</p>
+      <p class="mt-1 text-3xl font-semibold tabular-nums">{{ r.importe_arca ?? 0 | currency: 'ARS' : 'symbol-narrow' }}</p>
     </div>
-
-    <!-- Si no da 0: por qué, con lo que suma cada motivo y dónde están las filas -->
-    @if ((r.diferencia ?? 0) !== 0 && motivosDiferencia().length) {
-      <div class="mt-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
-        <p class="text-sm font-semibold text-red-800">Por qué la diferencia no da 0</p>
-        <ul class="mt-2 divide-y divide-red-100">
-          @for (m of motivosDiferencia(); track m.motivo) {
-            <li class="flex flex-wrap items-center gap-x-4 gap-y-1 py-2 text-sm">
-              <span class="h-2 w-2 shrink-0 rounded-full bg-red-500"></span>
-              <span class="min-w-0 flex-1 text-red-800">
-                {{ m.descripcion }}
-                <span class="text-red-700/80">· {{ m.cantidad }} {{ m.cantidad === 1 ? 'fila' : 'filas' }}</span>
-              </span>
-              <span class="font-semibold tabular-nums text-red-700">
-                {{ m.importe > 0 ? '+' : '' }}{{ m.importe | currency: 'ARS' : 'symbol-narrow' }}
-              </span>
-              <button type="button" (click)="verMotivo(m)" class="text-xs font-semibold text-red-700 underline-offset-2 hover:underline">
-                Ver en rojo
-              </button>
-            </li>
-          }
-        </ul>
-        <p class="mt-1 text-xs text-red-700/80">Sumados dan la diferencia. Las filas responsables están marcadas en rojo en el detalle y en el Excel.</p>
-      </div>
-    }
-
-    <!-- Avance: cuánto de lo informado por ARCA quedó conciliado -->
-    <div class="mt-6">
-      <div class="mb-1.5 flex justify-between text-sm">
-        <span class="font-medium">Conciliado</span>
-        <span class="font-semibold text-emerald-700">{{ avance() | percent: '1.0-1' }}</span>
-      </div>
-      <div class="flex h-2.5 w-full overflow-hidden rounded-full bg-canvas">
-        <div class="h-full bg-emerald-500 transition-all" [style.width.%]="avance() * 100"></div>
-        <div class="h-full bg-red-400 transition-all" [style.width.%]="r.importe_arca ? (r.importe_faltan_en_mayor / r.importe_arca) * 100 : 0"></div>
-      </div>
-      <div class="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted">
-        <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-emerald-500"></span>A · Conciliados {{ r.importe_conciliado | currency: 'ARS' : 'symbol-narrow' }}</span>
-        <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-red-400"></span>C · Faltan en el Mayor {{ r.importe_faltan_en_mayor | currency: 'ARS' : 'symbol-narrow' }}</span>
-        @if (r.total_manuales) {
-          <span>{{ r.total_manuales }} conciliada/s a mano</span>
-        }
-        @if (r.fuera_de_periodo) {
-          <span title="Asientos de los días de tolerancia posteriores al período, sin retención en ARCA: son del período siguiente.">
-            {{ r.fuera_de_periodo }} asiento/s del período siguiente sin contar
-          </span>
-        }
-      </div>
+    <div class="p-6">
+      <p class="text-sm text-muted">Registrado en Mayor</p>
+      <p class="mt-1 text-3xl font-semibold tabular-nums">{{ r.importe_mayor ?? 0 | currency: 'ARS' : 'symbol-narrow' }}</p>
+    </div>
+    <div class="p-6">
+      <p class="text-sm text-muted">Diferencia Neta</p>
+      <p class="mt-1 text-3xl font-semibold tabular-nums" [class]="dif === 0 ? 'text-emerald-700' : 'text-red-600'">{{ dif | currency: 'ARS' : 'symbol-narrow' }}</p>
     </div>
   </section>
 
-  <!-- Bandejas -->
-  <div class="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-    @for (p of pestanas; track p.id) {
-      @if (p.id !== 'revisar' || cantidad('revisar')) {
-        @let activa = pestanaActiva() === p.id;
-        <button
-          type="button"
-          (click)="elegirPestana(p.id)"
-          class="rounded-2xl border-2 bg-white p-4 text-left transition-all hover:shadow-sm"
-          [class]="activa
-            ? (p.tono === 'rojo' ? 'border-red-400' : p.tono === 'ambar' ? 'border-amber-400' : p.tono === 'verde' ? 'border-emerald-500' : 'border-brand-600')
-            : 'border-line'"
-        >
-          <div class="flex items-center justify-between gap-2">
-            <span class="flex items-center gap-2 text-sm font-semibold">
-              @if (p.letra) {
-                <span class="flex h-5 w-5 items-center justify-center rounded-md bg-canvas text-xs font-bold text-muted">{{ p.letra }}</span>
-              }
-              {{ p.titulo }}
-            </span>
-            <span
-              class="h-2.5 w-2.5 rounded-full"
-              [class]="p.tono === 'rojo' ? 'bg-red-500' : p.tono === 'ambar' ? 'bg-amber-500' : p.tono === 'verde' ? 'bg-emerald-500' : 'bg-brand-600'"
-            ></span>
-          </div>
-          <p
-            class="mt-2 text-3xl font-semibold tabular-nums"
-            [class]="p.tono === 'rojo' ? 'text-red-600' : p.tono === 'ambar' ? 'text-amber-600' : p.tono === 'verde' ? 'text-emerald-700' : 'text-brand-700'"
-          >
-            {{ cantidad(p.id) }}
-          </p>
-          <p class="text-sm text-muted tabular-nums">{{ importe(p.id) | currency: 'ARS' : 'symbol-narrow' }}</p>
-          <p class="mt-2 text-xs text-muted">{{ p.significado }}</p>
-        </button>
-      }
+  <!-- Tarjetas de estado: filtran la tabla de abajo -->
+  <div class="mb-6 grid gap-4 md:grid-cols-3">
+    @for (p of tarjetas; track p.id) {
+      @let activa = pestanaActiva() === p.id;
+      @let exactos = p.id === 'conciliados';
+      @let cuantas = exactos ? (r.partidas_exactas ?? 0) : cantidad(p.id);
+      <button
+        type="button"
+        (click)="elegirPestana(p.id)"
+        [attr.aria-pressed]="activa"
+        class="rounded-2xl border-2 p-6 text-left transition-all hover:shadow-sm"
+        [class]="activa
+          ? (p.tono === 'rojo' ? 'border-red-400 bg-red-50/60' : p.tono === 'ambar' ? 'border-amber-400 bg-amber-50/60' : 'border-emerald-500 bg-emerald-50/60')
+          : 'border-line bg-white'"
+      >
+        <span class="flex items-center gap-2 font-semibold">
+          <span class="h-2.5 w-2.5 rounded-full" [class]="p.tono === 'rojo' ? 'bg-red-500' : p.tono === 'ambar' ? 'bg-amber-500' : 'bg-emerald-500'"></span>
+          {{ exactos ? 'Conciliados Exactos' : p.titulo }}
+        </span>
+        <span class="mt-3 block text-4xl font-bold tabular-nums" [class]="p.tono === 'rojo' ? 'text-red-600' : p.tono === 'ambar' ? 'text-amber-600' : 'text-emerald-700'">
+          {{ cuantas }}
+          <span class="text-base font-semibold">{{ cuantas === 1 ? 'partida' : 'partidas' }}</span>
+        </span>
+        <span class="mt-1 block min-h-5 text-sm text-muted tabular-nums">
+          @if (!exactos) {
+            {{ importe(p.id) | currency: 'ARS' : 'symbol-narrow' }}
+          } @else if (paresObservados()) {
+            + {{ paresObservados() }} con observación
+          }
+        </span>
+      </button>
     }
   </div>
 
-  <!-- Primeros casos de B y C -->
-  <div class="mb-6 grid gap-4 xl:grid-cols-2">
-    @for (bloque of primerosCasos(); track bloque.config.id) {
-      @let avisable = bloque.config.id === 'faltan_en_arca';
-      <section class="flex flex-col overflow-hidden rounded-2xl border border-line bg-white">
-        <div class="flex items-start justify-between gap-3 px-5 pt-4 pb-3">
-          <div class="min-w-0">
-            <h2 class="flex items-center gap-2 font-semibold">
-              <span
-                class="flex h-6 w-6 items-center justify-center rounded-md text-xs font-bold"
-                [class]="bloque.config.tono === 'ambar' ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-700'"
-              >{{ bloque.config.letra }}</span>
-              {{ bloque.config.titulo }}
-              <span class="text-sm font-normal text-muted">({{ bloque.total }})</span>
-            </h2>
-            <p class="mt-1 text-xs text-muted">{{ bloque.config.accion }}</p>
-          </div>
-          @if (bloque.total) {
-            <button type="button" (click)="elegirPestana(bloque.config.id)" class="shrink-0 rounded-md px-2 py-1 text-xs font-semibold text-brand-700 hover:bg-brand-50">
-              Ver detalle →
-            </button>
-          }
-        </div>
-
-        @if (bloque.filas.length) {
-          @if (avisable) {
-            <label class="flex cursor-pointer items-center gap-3 border-y border-line bg-canvas/50 px-5 py-2 text-xs font-semibold text-muted select-none">
-              <input
-                type="checkbox"
-                [checked]="marcaTodas() === 'todas'"
-                [indeterminate]="marcaTodas() === 'algunas'"
-                (change)="alternarTodas()"
-                class="h-4 w-4 cursor-pointer accent-amber-600"
-              />
-              Elegir {{ bloque.total === 1 ? 'el movimiento' : 'los ' + bloque.total + ' movimientos' }} para avisar al cliente
-            </label>
-          } @else {
-            <div class="border-t border-line"></div>
-          }
-          <ul class="flex-1 divide-y divide-line">
-            @for (f of bloque.filas; track f.id ?? $index) {
-              @let marcada = avisable && elegida(f);
-              <li>
-                <label
-                  class="flex items-center gap-3 px-5 py-2.5 text-sm transition-colors"
-                  [class]="avisable ? (marcada ? 'cursor-pointer bg-amber-50/70' : 'cursor-pointer hover:bg-canvas/60') : ''"
-                >
-                  @if (avisable) {
-                    <input
-                      type="checkbox"
-                      [checked]="marcada"
-                      (change)="alternar(f)"
-                      class="h-4 w-4 shrink-0 cursor-pointer accent-amber-600"
-                    />
-                  }
-                  <span class="min-w-0 flex-1">
-                    <span class="block truncate font-medium">{{ f.razon_social || f.descripcion || '—' }}</span>
-                    <span class="block truncate text-xs text-muted">
-                      {{ f.fecha | date: 'dd/MM/yyyy' }}
-                      @if (f.impuesto) { · {{ f.impuesto }} }
-                      @if (avisable ? f.documento : f.certificado; as ref) { · <span class="font-mono">{{ ref }}</span> }
-                    </span>
-                  </span>
-                  <span class="shrink-0 font-semibold tabular-nums">{{ f.importe | currency: 'ARS' : 'symbol-narrow' }}</span>
-                </label>
-              </li>
-            }
-          </ul>
-          @if (bloque.total > casosEnResumen) {
-            <button
-              type="button"
-              (click)="elegirPestana(bloque.config.id)"
-              class="border-t border-line px-5 py-2 text-left text-xs font-semibold text-brand-700 hover:bg-brand-50"
-            >
-              Y {{ bloque.total - casosEnResumen }} más en el detalle →
-            </button>
-          }
-          @if (avisable) {
-            <!-- Lo elegido para avisar al cliente -->
-            <div
-              class="flex items-center justify-between gap-3 border-t px-5 py-3 text-sm"
-              [class]="seleccionadas().length ? 'border-amber-200 bg-amber-50' : 'border-line bg-canvas/40'"
-            >
-              @if (seleccionadas().length) {
-                <p class="text-amber-900">
-                  <span class="font-semibold">{{ seleccionadas().length }}</span>
-                  {{ seleccionadas().length === 1 ? 'elegido' : 'elegidos' }} ·
-                  <span class="font-semibold tabular-nums">{{ totalSeleccionado() | currency: 'ARS' : 'symbol-narrow' }}</span>
-                  <button type="button" (click)="quitarSeleccion()" class="ml-2 text-xs font-semibold text-amber-900/60 hover:text-amber-900 hover:underline">
-                    Quitar
-                  </button>
-                </p>
-              } @else {
-                <p class="text-xs text-muted">Tildá los movimientos que querés consultarle al cliente.</p>
-              }
-              <button
-                type="button"
-                (click)="abrirAviso()"
-                [disabled]="!seleccionadas().length"
-                class="inline-flex shrink-0 items-center gap-2 rounded-lg bg-amber-600 px-3 py-1.5 font-semibold text-white transition-colors hover:bg-amber-700 disabled:cursor-not-allowed disabled:bg-amber-600/30"
-              >
-                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M4 4h16v12H5.2L4 17.2V4Z" /><path d="M8 9h8M8 12h5" />
-                </svg>
-                Avisar al cliente
-              </button>
-            </div>
-          }
-        } @else {
-          <p class="border-t border-line px-5 py-6 text-center text-sm text-emerald-700">✓ {{ bloque.config.vacio }}</p>
-        }
-      </section>
-    }
-  </div>
-
-  <!-- Por impuesto -->
-  @if (store.porImpuesto().length) {
-    <section class="mb-6 overflow-hidden rounded-2xl border border-line bg-white">
-      <div class="flex items-baseline justify-between gap-3 px-6 pt-5 pb-3">
-        <h2 class="text-lg font-semibold">Por impuesto</h2>
-        <p class="text-xs text-muted">Lo que se controla antes de computar las retenciones en cada DDJJ</p>
-      </div>
-      <div class="overflow-x-auto">
-        <table class="min-w-full text-sm whitespace-nowrap">
-          <thead class="border-y border-line bg-canvas/60 text-left text-xs tracking-wider text-muted uppercase">
-            <tr>
-              <th class="px-6 py-2.5 font-semibold">Impuesto</th>
-              <th class="px-4 py-2.5 text-right font-semibold">ARCA</th>
-              <th class="px-4 py-2.5 text-right font-semibold">Libro Mayor</th>
-              <th class="px-4 py-2.5 text-right font-semibold">Diferencia</th>
-              <th class="px-6 py-2.5 font-semibold">Conciliado</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-line">
-            @for (i of store.porImpuesto(); track i.impuesto) {
-              @let parte = i.importe_arca ? i.conciliado / i.importe_arca : i.importe_mayor ? 0 : 1;
-              <tr class="cursor-pointer hover:bg-canvas/60" (click)="filtrarImpuesto(i.impuesto)" title="Filtrar el detalle por este impuesto">
-                <td class="px-4 py-3 font-medium">{{ i.impuesto }}</td>
-                <td class="px-4 py-3 text-right tabular-nums">
-                  {{ i.importe_arca | currency: 'ARS' : 'symbol-narrow' }}
-                  <span class="block text-xs text-muted">{{ i.cantidad_arca }} ret.</span>
-                </td>
-                <td class="px-4 py-3 text-right tabular-nums">
-                  {{ i.importe_mayor | currency: 'ARS' : 'symbol-narrow' }}
-                  <span class="block text-xs text-muted">{{ i.cantidad_mayor }} asientos</span>
-                </td>
-                <td class="px-4 py-3 text-right font-semibold tabular-nums" [class]="i.diferencia === 0 ? 'text-emerald-700' : 'text-red-600'">
-                  {{ i.diferencia === 0 ? '✓' : (i.diferencia | currency: 'ARS' : 'symbol-narrow') }}
-                </td>
-                <td class="w-64 px-6 py-3">
-                  <div class="flex items-center gap-3">
-                    <div class="h-1.5 flex-1 overflow-hidden rounded-full bg-canvas">
-                      <div class="h-full rounded-full bg-emerald-500" [style.width.%]="parte * 100"></div>
-                    </div>
-                    <span class="w-12 text-right text-xs font-semibold text-muted">{{ parte | percent: '1.0-0' }}</span>
-                  </div>
-                </td>
-              </tr>
-            }
-          </tbody>
-        </table>
-      </div>
-    </section>
+  @if (cantidad('revisar')) {
+    <button
+      type="button"
+      (click)="elegirPestana('revisar')"
+      [attr.aria-pressed]="pestanaActiva() === 'revisar'"
+      class="mb-6 flex w-full items-center gap-3 rounded-xl border-2 px-4 py-2.5 text-left text-sm font-semibold text-brand-700 transition-colors hover:bg-brand-50"
+      [class]="pestanaActiva() === 'revisar' ? 'border-brand-600 bg-brand-50' : 'border-line bg-white'"
+    >
+      {{ cantidad('revisar') }} {{ cantidad('revisar') === 1 ? 'posible par para confirmar' : 'posibles pares para confirmar' }}
+      <span class="ml-auto tabular-nums">{{ importe('revisar') | currency: 'ARS' : 'symbol-narrow' }}</span>
+    </button>
   }
 
   <!-- Detalle -->
   <section id="detalle" class="scroll-mt-4 rounded-2xl border border-line bg-white">
-    <!-- Pestañas -->
-    <nav class="flex gap-1 overflow-x-auto border-b border-line px-4 pt-2" aria-label="Detalle">
-      @for (p of pestanas; track p.id) {
-        @if (p.id !== 'revisar' || cantidad('revisar')) {
-          @let activa = pestanaActiva() === p.id;
-          <button
-            type="button"
-            (click)="elegirPestana(p.id)"
-            [attr.aria-current]="activa ? 'page' : null"
-            class="-mb-px flex shrink-0 items-center gap-2 border-b-2 px-3 py-3 text-sm font-semibold transition-colors"
-            [class]="activa ? 'border-brand-600 text-brand-700' : 'border-transparent text-muted hover:border-line hover:text-ink'"
-          >
-            @if (p.letra) {
-              <span class="text-xs font-bold opacity-60">{{ p.letra }}</span>
-            }
-            {{ p.titulo }}
-            <span
-              class="min-w-6 rounded-full px-1.5 py-0.5 text-center text-xs tabular-nums"
-              [class]="activa ? 'bg-brand-50 text-brand-700' : 'bg-canvas text-muted'"
-            >
-              {{ cantidad(p.id) }}
-            </span>
-          </button>
-        }
-      }
-    </nav>
-
     <!-- Qué es esta bandeja y qué hacer -->
     <div class="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 px-6 pt-5">
       <div class="min-w-0">
@@ -551,6 +257,34 @@
         <p class="mx-6 mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{{ store.errorGuardado() }}</p>
       }
 
+      <!-- Lo elegido para avisar al cliente -->
+      @if (pestanaActiva() === 'faltan_en_arca' && cantidad('faltan_en_arca')) {
+        <div
+          class="mx-6 mb-3 flex items-center justify-between gap-3 rounded-lg border px-4 py-2 text-sm"
+          [class]="seleccionadas().length ? 'border-amber-200 bg-amber-50' : 'border-line bg-canvas/40'"
+        >
+          @if (seleccionadas().length) {
+            <p class="text-amber-900">
+              <span class="font-semibold">{{ seleccionadas().length }}</span>
+              {{ seleccionadas().length === 1 ? 'elegido' : 'elegidos' }} ·
+              <span class="font-semibold tabular-nums">{{ totalSeleccionado() | currency: 'ARS' : 'symbol-narrow' }}</span>
+              <button type="button" (click)="quitarSeleccion()" class="ml-2 text-xs font-semibold text-amber-900/60 hover:text-amber-900 hover:underline">Quitar</button>
+            </p>
+          } @else {
+            <p class="text-xs text-muted">Tildá los movimientos que querés consultarle al cliente.</p>
+          }
+          <button
+            type="button"
+            (click)="abrirAviso()"
+            [disabled]="!seleccionadas().length"
+            class="inline-flex shrink-0 items-center gap-2 rounded-lg bg-amber-600 px-3 py-1.5 font-semibold text-white transition-colors hover:bg-amber-700 disabled:cursor-not-allowed disabled:bg-amber-600/30"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v12H5.2L4 17.2V4Z" /><path d="M8 9h8M8 12h5" /></svg>
+            Avisar al cliente
+          </button>
+        </div>
+      }
+
       <!-- Agregados sin guardar -->
       @if (nuevos().length) {
         <div class="mx-6 mb-3 rounded-xl border border-amber-200 bg-amber-50/60 p-3">
@@ -678,35 +412,56 @@
       }
 
       <!-- Caja de alto mediano con su propio scroll; "Ver todo" la estira -->
-      <div class="overflow-y-auto border-t border-line" [class.max-h-[30rem]]="!tablaExpandida()" (scroll)="ubicarFiltro()">
-        <table class="w-full table-fixed text-[15px]">
+      <div class="overflow-auto border-t border-line" [class.max-h-[30rem]]="!tablaExpandida()" (scroll)="ubicarFiltro()">
+        <table class="w-full min-w-[60rem] table-fixed text-sm">
           <colgroup>
-            <col class="w-14" />
+            <col [class]="pestanaActiva() === 'faltan_en_arca' ? 'w-20' : 'w-14'" />
+            <col class="w-28" />
+            <col class="w-32" />
             <col class="w-32" />
             <col />
-            <col class="w-36" />
-            <col class="w-40" />
+            <col class="w-32" />
+            <col class="w-32" />
             @if (pestanaActiva() === 'faltan_en_mayor') {
-              <col class="w-32" />
+              <col class="w-28" />
             }
-            <col class="w-14" />
+            <col class="w-12" />
           </colgroup>
           <thead class="sticky top-0 z-10 bg-canvas text-left text-xs tracking-wider text-muted uppercase shadow-[inset_0_-1px_0_var(--color-line,#e5e7eb)]">
             <tr>
               <th class="py-3 pl-4">
-                <button
-                  type="button"
-                  (click)="alternarTodosDesplegados()"
-                  class="grid h-7 w-7 place-items-center rounded-md text-muted hover:bg-white hover:text-ink"
-                  [title]="todosDesplegados() ? 'Plegar todos' : 'Desplegar todos'"
-                >
-                  <svg class="h-4 w-4 transition-transform" [class.rotate-90]="todosDesplegados()" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6" /></svg>
-                </button>
+                <div class="flex items-center gap-1.5">
+                  @if (pestanaActiva() === 'faltan_en_arca') {
+                    <input
+                      type="checkbox"
+                      [checked]="marcaTodas() === 'todas'"
+                      [indeterminate]="marcaTodas() === 'algunas'"
+                      (change)="alternarTodas()"
+                      aria-label="Elegir todos para avisar al cliente"
+                      class="h-4 w-4 cursor-pointer accent-amber-600"
+                    />
+                  }
+                  <button
+                    type="button"
+                    (click)="alternarTodosDesplegados()"
+                    class="grid h-7 w-7 place-items-center rounded-md text-muted hover:bg-white hover:text-ink"
+                    [title]="todosDesplegados() ? 'Plegar todos' : 'Desplegar todos'"
+                  >
+                    <svg class="h-4 w-4 transition-transform" [class.rotate-90]="todosDesplegados()" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6" /></svg>
+                  </button>
+                </div>
               </th>
               <ng-container *ngTemplateOutlet="encabezado; context: { $implicit: 'fecha', titulo: 'Fecha' }" />
-              <ng-container *ngTemplateOutlet="encabezado; context: { $implicit: 'razon_social', titulo: pestanaActiva() === 'faltan_en_arca' ? 'Organización' : 'Agente' }" />
-              <ng-container *ngTemplateOutlet="encabezado; context: { $implicit: 'impuesto', titulo: 'Impuesto' }" />
-              <ng-container *ngTemplateOutlet="encabezado; context: { $implicit: 'importe', titulo: 'Importe', derecha: true }" />
+              <th class="px-4 py-3 font-semibold">Comprobante</th>
+              <th class="px-4 py-3 font-semibold">CUIT</th>
+              <ng-container *ngTemplateOutlet="encabezado; context: { $implicit: 'razon_social', titulo: 'Razón Social' }" />
+              @if (pestanaActiva() === 'faltan_en_arca') {
+                <th class="px-4 py-3 text-right font-semibold">Monto ARCA</th>
+                <ng-container *ngTemplateOutlet="encabezado; context: { $implicit: 'importe', titulo: 'Monto Mayor', derecha: true }" />
+              } @else {
+                <ng-container *ngTemplateOutlet="encabezado; context: { $implicit: 'importe', titulo: 'Monto ARCA', derecha: true }" />
+                <th class="px-4 py-3 text-right font-semibold">Monto Mayor</th>
+              }
               @if (pestanaActiva() === 'faltan_en_mayor') {
                 <th class="px-4 py-3"></th>
               }
@@ -727,33 +482,55 @@
                 [title]="quitada ? 'Se quita al guardar' : responsable ? 'Responsable de la diferencia ARCA − Mayor' : 'Clic para ver el resto de los datos'"
               >
                 <td class="py-3.5 pl-4 align-top" [class.border-l-4]="responsable" [class.border-red-500]="responsable">
-                  <span class="grid h-7 w-7 place-items-center rounded-md text-muted">
-                    <svg class="h-4 w-4 transition-transform" [class.rotate-90]="abierta" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6" /></svg>
-                  </span>
+                  <div class="flex items-center gap-1.5">
+                    @if (pestanaActiva() === 'faltan_en_arca') {
+                      <input
+                        type="checkbox"
+                        [checked]="elegida(item)"
+                        (click)="$event.stopPropagation()"
+                        (change)="alternar(item)"
+                        [attr.aria-label]="'Elegir ' + (item.razon_social || 'movimiento') + ' para avisar al cliente'"
+                        class="h-4 w-4 cursor-pointer accent-amber-600"
+                      />
+                    }
+                    <span class="grid h-7 w-7 place-items-center rounded-md text-muted">
+                      <svg class="h-4 w-4 transition-transform" [class.rotate-90]="abierta" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6" /></svg>
+                    </span>
+                  </div>
                 </td>
                 <td class="px-4 py-3.5 align-top tabular-nums">
                   <ng-container *ngTemplateOutlet="editable; context: { $implicit: item, campo: 'fecha', texto: fechaCorta(item.fecha) }" />
                 </td>
+                <td class="px-4 py-3.5 align-top font-mono text-[13px] break-words">
+                  <ng-container *ngTemplateOutlet="resaltado; context: { $implicit: comprobante(item) }" />
+                </td>
+                <td class="px-4 py-3.5 align-top font-mono text-[13px]">
+                  <ng-container *ngTemplateOutlet="resaltado; context: { $implicit: item.cuit || '—' }" />
+                </td>
                 <td class="px-4 py-3.5 align-top">
                   <ng-container *ngTemplateOutlet="editable; context: { $implicit: item, campo: 'razon_social', texto: item.razon_social || '—', clase: 'font-semibold break-words' }" />
-                  @if (item.cuit) {
-                    <p class="mt-0.5 font-mono text-[13px] text-muted">
-                      <ng-container *ngTemplateOutlet="resaltado; context: { $implicit: item.cuit }" />
-                    </p>
+                  <p class="mt-0.5 text-[13px] text-muted">
+                    {{ item.impuesto || 'Sin impuesto' }}@if (item.tipo) { · {{ item.tipo === 'Percepcion' ? 'Percepción' : 'Retención' }} }
+                  </p>
+                  @if (item.observacion) {
+                    <p class="mt-1 inline-block rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800">{{ item.observacion }}</p>
                   }
                 </td>
-                <td class="px-4 py-3.5 align-top">
-                  {{ item.impuesto || '—' }}
-                  @if (item.tipo) {
-                    <span class="block text-[13px] text-muted">{{ item.tipo === 'Percepcion' ? 'Percepción' : 'Retención' }}</span>
-                  }
-                </td>
+                @let soloMayor = pestanaActiva() === 'faltan_en_arca';
                 <td class="px-4 py-3.5 text-right align-top font-semibold tabular-nums" [class.text-red-700]="responsable">
-                  <ng-container *ngTemplateOutlet="editable; context: { $implicit: item, campo: 'importe', texto: pesos(item.importe), clase: 'text-right tabular-nums' }" />
-                  @if (item.diferencia_importe) {
-                    <span class="block text-[13px] font-normal" [class]="responsable ? 'text-red-700' : 'text-amber-700'">
-                      mayor {{ item.importe_mayor | currency: 'ARS' : 'symbol-narrow' }}
-                    </span>
+                  @if (soloMayor) {
+                    <span class="font-normal text-muted">—</span>
+                  } @else {
+                    <ng-container *ngTemplateOutlet="editable; context: { $implicit: item, campo: 'importe', texto: pesos(item.importe), clase: 'text-right tabular-nums' }" />
+                  }
+                </td>
+                <td class="px-4 py-3.5 text-right align-top font-semibold tabular-nums" [class.text-red-700]="responsable" [class.text-amber-700]="!responsable && item.diferencia_importe">
+                  @if (soloMayor) {
+                    <ng-container *ngTemplateOutlet="editable; context: { $implicit: item, campo: 'importe', texto: pesos(item.importe), clase: 'text-right tabular-nums' }" />
+                  } @else if (pestanaActiva() === 'faltan_en_mayor') {
+                    <span class="font-normal text-muted">—</span>
+                  } @else {
+                    {{ pesos(item.importe_mayor ?? item.importe) }}
                   }
                 </td>
                 @if (pestanaActiva() === 'faltan_en_mayor') {
@@ -791,7 +568,7 @@
               <!-- El resto de los datos, en un cuadro que se despliega -->
               @if (abierta) {
                 <tr [class]="responsable ? 'bg-red-50/40' : 'bg-canvas/60'">
-                  <td [attr.colspan]="pestanaActiva() === 'faltan_en_mayor' ? 7 : 6" class="px-4 pt-0 pb-4">
+                  <td [attr.colspan]="columnas()" class="px-4 pt-0 pb-4">
                     <dl class="ml-10 grid gap-x-6 gap-y-3 rounded-xl border border-line bg-white p-4 text-sm text-ink sm:grid-cols-2 lg:grid-cols-3">
                       @switch (pestanaActiva()) {
                         @case ('conciliados') {
@@ -876,7 +653,7 @@
               }
             } @empty {
               <tr>
-                <td colspan="7" class="px-6 py-16 text-center text-muted">
+                <td [attr.colspan]="columnas()" class="px-6 py-16 text-center text-muted">
                   {{ hayFiltro() ? 'Nada coincide con los filtros.' : config().vacio }}
                 </td>
               </tr>
@@ -903,6 +680,134 @@
       }
     }
   </section>
+
+  <!-- Lo que no hace falta para decidir, plegado -->
+  <details class="mt-6 overflow-hidden rounded-2xl border border-line bg-white">
+    <summary class="cursor-pointer px-6 py-4 font-semibold">Detalle del cruce</summary>
+    <div class="border-t border-line p-6">
+    <!-- Si no da 0: por qué, con lo que suma cada motivo y dónde están las filas -->
+    @if ((r.diferencia ?? 0) !== 0 && motivosDiferencia().length) {
+      <div class="mt-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+        <p class="text-sm font-semibold text-red-800">Por qué la diferencia no da 0</p>
+        <ul class="mt-2 divide-y divide-red-100">
+          @for (m of motivosDiferencia(); track m.motivo) {
+            <li class="flex flex-wrap items-center gap-x-4 gap-y-1 py-2 text-sm">
+              <span class="h-2 w-2 shrink-0 rounded-full bg-red-500"></span>
+              <span class="min-w-0 flex-1 text-red-800">
+                {{ m.descripcion }}
+                <span class="text-red-700/80">· {{ m.cantidad }} {{ m.cantidad === 1 ? 'fila' : 'filas' }}</span>
+              </span>
+              <span class="font-semibold tabular-nums text-red-700">
+                {{ m.importe > 0 ? '+' : '' }}{{ m.importe | currency: 'ARS' : 'symbol-narrow' }}
+              </span>
+              <button type="button" (click)="verMotivo(m)" class="text-xs font-semibold text-red-700 underline-offset-2 hover:underline">
+                Ver en rojo
+              </button>
+            </li>
+          }
+        </ul>
+        <p class="mt-1 text-xs text-red-700/80">Sumados dan la diferencia. Las filas responsables están marcadas en rojo en el detalle y en el Excel.</p>
+      </div>
+    }
+    <!-- Avance: cuánto de lo informado por ARCA quedó conciliado -->
+    <div class="mt-6">
+      <div class="mb-1.5 flex justify-between text-sm">
+        <span class="font-medium">Conciliado</span>
+        <span class="font-semibold text-emerald-700">{{ avance() | percent: '1.0-1' }}</span>
+      </div>
+      <div class="flex h-2.5 w-full overflow-hidden rounded-full bg-canvas">
+        <div class="h-full bg-emerald-500 transition-all" [style.width.%]="avance() * 100"></div>
+        <div class="h-full bg-red-400 transition-all" [style.width.%]="r.importe_arca ? (r.importe_faltan_en_mayor / r.importe_arca) * 100 : 0"></div>
+      </div>
+      <div class="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted">
+        <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-emerald-500"></span>A · Conciliados {{ r.importe_conciliado | currency: 'ARS' : 'symbol-narrow' }}</span>
+        <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-red-400"></span>C · Faltan en el Mayor {{ r.importe_faltan_en_mayor | currency: 'ARS' : 'symbol-narrow' }}</span>
+        @if (r.total_manuales) {
+          <span>{{ r.total_manuales }} conciliada/s a mano</span>
+        }
+        @if (r.fuera_de_periodo) {
+          <span title="Asientos de los días de tolerancia posteriores al período, sin retención en ARCA: son del período siguiente.">
+            {{ r.fuera_de_periodo }} asiento/s del período siguiente sin contar
+          </span>
+        }
+      </div>
+    </div>
+    </div>
+  <!-- Por impuesto -->
+  @if (store.porImpuesto().length) {
+    <section class="border-t border-line">
+      <div class="flex items-baseline justify-between gap-3 px-6 pt-5 pb-3">
+        <h2 class="text-lg font-semibold">Por impuesto</h2>
+        <p class="text-xs text-muted">Lo que se controla antes de computar las retenciones en cada DDJJ</p>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-sm whitespace-nowrap">
+          <thead class="border-y border-line bg-canvas/60 text-left text-xs tracking-wider text-muted uppercase">
+            <tr>
+              <th class="px-6 py-2.5 font-semibold">Impuesto</th>
+              <th class="px-4 py-2.5 text-right font-semibold">ARCA</th>
+              <th class="px-4 py-2.5 text-right font-semibold">Libro Mayor</th>
+              <th class="px-4 py-2.5 text-right font-semibold">Diferencia</th>
+              <th class="px-6 py-2.5 font-semibold">Conciliado</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-line">
+            @for (i of store.porImpuesto(); track i.impuesto) {
+              @let parte = i.importe_arca ? i.conciliado / i.importe_arca : i.importe_mayor ? 0 : 1;
+              <tr class="cursor-pointer hover:bg-canvas/60" (click)="filtrarImpuesto(i.impuesto)" title="Filtrar el detalle por este impuesto">
+                <td class="px-4 py-3 font-medium">{{ i.impuesto }}</td>
+                <td class="px-4 py-3 text-right tabular-nums">
+                  {{ i.importe_arca | currency: 'ARS' : 'symbol-narrow' }}
+                  <span class="block text-xs text-muted">{{ i.cantidad_arca }} ret.</span>
+                </td>
+                <td class="px-4 py-3 text-right tabular-nums">
+                  {{ i.importe_mayor | currency: 'ARS' : 'symbol-narrow' }}
+                  <span class="block text-xs text-muted">{{ i.cantidad_mayor }} asientos</span>
+                </td>
+                <td class="px-4 py-3 text-right font-semibold tabular-nums" [class]="i.diferencia === 0 ? 'text-emerald-700' : 'text-red-600'">
+                  {{ i.diferencia === 0 ? '✓' : (i.diferencia | currency: 'ARS' : 'symbol-narrow') }}
+                </td>
+                <td class="w-64 px-6 py-3">
+                  <div class="flex items-center gap-3">
+                    <div class="h-1.5 flex-1 overflow-hidden rounded-full bg-canvas">
+                      <div class="h-full rounded-full bg-emerald-500" [style.width.%]="parte * 100"></div>
+                    </div>
+                    <span class="w-12 text-right text-xs font-semibold text-muted">{{ parte | percent: '1.0-0' }}</span>
+                  </div>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </section>
+  }
+  </details>
+
+  <!-- Pie fijo -->
+  <div class="sticky bottom-0 z-30 -mx-10 -mb-10 mt-6 flex flex-wrap items-center gap-3 border-t border-line bg-white px-10 py-3 shadow-[0_-4px_12px_rgba(0,0,0,0.05)]">
+    <p class="mr-auto text-sm">
+      Total de discrepancias a justificar:
+      <strong class="tabular-nums">{{ r.partidas_a_revisar ?? 0 }} {{ r.partidas_a_revisar === 1 ? 'partida' : 'partidas' }}</strong>
+    </p>
+    <button
+      type="button"
+      (click)="store.exportar()"
+      [disabled]="!store.puedeExportar()"
+      class="rounded-lg border border-line bg-white px-4 py-2.5 font-semibold transition-colors hover:bg-canvas disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      {{ store.exportando() ? 'Generando Excel…' : 'Exportar Excel' }}
+    </button>
+    <button
+      type="button"
+      (click)="abrirEnvio()"
+      [disabled]="!store.puedeExportar() || !sesion.puedePreparar()"
+      [title]="sesion.puedePreparar() ? '' : 'Tu sesión terminó: volvé a ingresar'"
+      class="rounded-lg bg-brand-700 px-4 py-2.5 font-semibold text-white shadow-sm transition-colors hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      Generar Lote para Revisión
+    </button>
+  </div>
 } @else {
   <!-- Sin resultado todavía -->
   <section class="flex min-h-96 flex-col items-center justify-center rounded-2xl border border-line bg-white px-6 text-center">
@@ -1122,75 +1027,94 @@
   </div>
 }
 
-<!-- Enviar a revisión -->
+<!-- Generar el lote: se confirma, no se completa -->
 @if (envio(); as f) {
+  @let conocido = identidad();
+  @let r = store.resumen();
   <div class="fixed inset-0 z-40 flex items-center justify-center bg-ink/40 p-4" (click)="envio.set(null)">
-    <form
+    <div
       class="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-xl"
       (click)="$event.stopPropagation()"
-      (submit)="$event.preventDefault(); enviar()"
       role="dialog"
       aria-modal="true"
       aria-labelledby="titulo-envio"
     >
       <div class="border-b border-line px-6 py-4">
-        <h3 id="titulo-envio" class="text-lg font-semibold">Crear lote para revisión</h3>
-        <p class="mt-1 text-sm text-muted">
-          Se genera el papel de trabajo con el estado de cada partida. Queda en borrador hasta que lo justifiques y lo envíes; después lo revisa otra persona.
-        </p>
+        <h3 id="titulo-envio" class="text-lg font-semibold">Generar Lote de Revisión</h3>
+        <p class="mt-1 text-sm text-muted">Se generará el lote en tu bandeja para justificar las diferencias antes de enviarlo al supervisor.</p>
       </div>
-      <div class="grid gap-4 px-6 py-5 sm:grid-cols-2">
-        @if (lotesEditables().length) {
-          <label class="text-sm sm:col-span-2">
-            <span class="font-semibold">Destino</span>
-            <select [value]="f.destino" (change)="campoEnvio('destino', $any($event.target).value)"
-              class="mt-1 w-full rounded-lg border border-line bg-white px-3 py-2 outline-none focus:border-brand-400">
-              <option value="">Lote nuevo</option>
-              @for (l of lotesEditables(); track l.id) {
-                <option [value]="l.id">Versión nueva de {{ l.empresa }} {{ l.periodo }} (hoy v{{ l.version_vigente }}, {{ l.estado }})</option>
+      <div class="space-y-4 px-6 py-5">
+        <dl class="grid gap-3 rounded-xl bg-canvas p-4 text-sm sm:grid-cols-[minmax(0,1fr)_auto_auto]">
+          <div class="min-w-0">
+            <dt class="text-xs font-semibold tracking-wide text-muted uppercase">Cliente</dt>
+            <dd class="mt-1 font-semibold break-words">
+              @if (conocido.empresa) {
+                {{ conocido.empresa }}
+              } @else {
+                <input type="text" [value]="f.empresa" (input)="campoEnvio('empresa', $any($event.target).value)" aria-label="Cliente" placeholder="Razón social"
+                  class="w-full rounded-lg border border-line bg-white px-2 py-1 font-normal outline-none focus:border-brand-400" />
               }
-            </select>
-          </label>
+            </dd>
+          </div>
+          <div>
+            <dt class="text-xs font-semibold tracking-wide text-muted uppercase">CUIT</dt>
+            <dd class="mt-1 font-semibold whitespace-nowrap">
+              @if (conocido.cuit_empresa) {
+                {{ conocido.cuit_empresa }}
+              } @else {
+                <input type="text" [value]="f.cuit_empresa" (input)="campoEnvio('cuit_empresa', $any($event.target).value)" aria-label="CUIT" placeholder="30-12345678-9"
+                  class="w-32 rounded-lg border border-line bg-white px-2 py-1 font-normal outline-none focus:border-brand-400" />
+              }
+            </dd>
+          </div>
+          <div>
+            <dt class="text-xs font-semibold tracking-wide text-muted uppercase">Período</dt>
+            <dd class="mt-1 font-semibold whitespace-nowrap tabular-nums">
+              @if (conocido.periodo) {
+                {{ periodo(conocido.periodo) }}
+              } @else {
+                <input type="month" [value]="f.periodo" (input)="campoEnvio('periodo', $any($event.target).value)" aria-label="Período"
+                  class="rounded-lg border border-line bg-white px-2 py-1 font-normal outline-none focus:border-brand-400" />
+              }
+            </dd>
+          </div>
+        </dl>
+        @if (!conocido.empresa || !conocido.cuit_empresa || !conocido.periodo) {
+          <p class="text-xs text-muted">Los archivos subidos a mano no dicen de quién son: completá solo lo que falta.</p>
         }
-        @if (!f.destino) {
-          <label class="text-sm">
-            <span class="font-semibold">Cliente</span>
-            <input type="text" [value]="f.empresa" (input)="campoEnvio('empresa', $any($event.target).value)"
-              class="mt-1 w-full rounded-lg border border-line px-3 py-2 outline-none focus:border-brand-400" placeholder="Razón social" />
-          </label>
-          <label class="text-sm">
-            <span class="font-semibold">CUIT del cliente</span>
-            <input type="text" [value]="f.cuit_empresa" (input)="campoEnvio('cuit_empresa', $any($event.target).value)"
-              class="mt-1 w-full rounded-lg border border-line px-3 py-2 outline-none focus:border-brand-400" placeholder="30-12345678-9" />
-          </label>
-          <label class="text-sm">
-            <span class="font-semibold">Período</span>
-            <input type="month" [value]="f.periodo" (input)="campoEnvio('periodo', $any($event.target).value)"
-              class="mt-1 w-full rounded-lg border border-line px-3 py-2 outline-none focus:border-brand-400" />
-          </label>
-          <label class="text-sm sm:col-span-2">
-            <span class="font-semibold">Comentario</span> <span class="text-muted">(opcional, queda en la auditoría)</span>
-            <textarea rows="2" [value]="f.comentario" (input)="campoEnvio('comentario', $any($event.target).value)"
-              class="mt-1 w-full resize-none rounded-lg border border-line px-3 py-2 outline-none focus:border-brand-400"
-              placeholder="Ej.: revisar las dos retenciones de Proveedor SRL"></textarea>
-          </label>
+
+        <ul class="space-y-2 text-sm">
+          <li class="flex items-center gap-3 rounded-lg px-3 py-2">
+            <svg class="h-5 w-5 shrink-0 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" /><path d="m8 12 3 3 5-6" /></svg>
+            <span><strong class="tabular-nums">{{ r?.partidas_exactas ?? 0 }}</strong> {{ r?.partidas_exactas === 1 ? 'partida cuadró perfecto' : 'partidas cuadraron perfecto' }}</span>
+          </li>
+          <li class="flex items-center gap-3 rounded-lg bg-amber-50 px-3 py-2 font-semibold text-amber-900">
+            <svg class="h-5 w-5 shrink-0 text-amber-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 2 20h20L12 3Z" /><path d="M12 10v4M12 17h.01" /></svg>
+            <span><span class="tabular-nums">{{ r?.partidas_a_revisar ?? 0 }}</span> {{ r?.partidas_a_revisar === 1 ? 'partida requiere revisión manual' : 'partidas requieren revisión manual' }}</span>
+          </li>
+        </ul>
+
+        @if (loteExistente(); as l) {
+          <p class="rounded-lg bg-brand-50 px-3 py-2 text-sm text-brand-700">
+            Este lote ya existe: se suma como versión {{ l.version_vigente + 1 }} y conserva lo que ya justificaste.
+          </p>
         }
         @if (pendientes()) {
-          <p class="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 sm:col-span-2">
+          <p class="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
             Tenés {{ pendientes() }} cambio(s) sin guardar: no van en el lote hasta que toques «Guardar cambios».
           </p>
         }
         @if (lotes.error(); as e) {
-          <p class="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 sm:col-span-2">{{ e.mensaje }}</p>
+          <p class="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">{{ e.mensaje }}</p>
         }
       </div>
       <div class="flex justify-end gap-2 border-t border-line bg-canvas/40 px-6 py-3">
         <button type="button" (click)="envio.set(null)" class="rounded-lg px-4 py-2 font-semibold text-muted hover:bg-canvas">Cancelar</button>
-        <button type="submit" [disabled]="enviando() || (!f.destino && (!f.empresa.trim() || !f.periodo))"
-          class="rounded-lg bg-emerald-600 px-4 py-2 font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
-          {{ enviando() ? 'Generando…' : f.destino ? 'Sumar versión' : 'Crear lote' }}
+        <button type="button" (click)="enviar()" [disabled]="enviando() || !f.empresa.trim() || !f.periodo"
+          class="rounded-lg bg-brand-700 px-4 py-2 font-semibold text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-50">
+          {{ enviando() ? 'Generando…' : 'Generar e ir a Mis Tareas' }}
         </button>
       </div>
-    </form>
+    </div>
   </div>
 }

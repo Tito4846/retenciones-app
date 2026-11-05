@@ -1,5 +1,6 @@
 import { DatePipe } from '@angular/common';
 import { Component, computed, inject, linkedSignal, signal } from '@angular/core';
+import { ActivatedRoute } from '@angular/router';
 import { Observacion, Partida } from '../../core/models/lote.models';
 import { LotesStore } from '../../core/services/lotes.store';
 import { SesionService } from '../../core/services/sesion.service';
@@ -34,7 +35,8 @@ export class RevisionPantalla {
   protected readonly periodo = periodo;
 
   protected readonly d = this.store.detalle;
-  protected readonly seleccionId = signal<string | null>(null);
+  /** Al llegar recién generado, ya viene elegido. */
+  protected readonly seleccionId = signal<string | null>(inject(ActivatedRoute).snapshot.queryParamMap.get('lote'));
   private readonly loteId = computed(() => this.d()?.lote.id ?? null);
 
   protected readonly pestana = linkedSignal<string | null, Pestana>({ source: this.loteId, computation: () => 'excepciones' });

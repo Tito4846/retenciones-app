@@ -406,3 +406,27 @@ def test_el_excel_del_lote_muestra_ajustes_y_exclusiones(ruta_arca, ruta_mayor):
     assert r.status_code == 201, r.text
     nueva = {p["clave"]: p for p in r.json()["partidas"]}
     assert nueva[primera]["importe_ajustado"] == "10.50" and nueva[segunda]["excluida"] == 1
+
+
+def test_el_tablero_cuenta_igual_que_el_lote(ruta_arca, ruta_mayor):
+    task_id = _subir(ruta_arca, ruta_mayor).json()["task_id"]
+    estado = cliente.get(f"/api/estado/{task_id}").json()
+    resumen = estado["resumen"]
+    lote = cliente.post("/api/lotes", json={"task_id": task_id, "empresa": "Piccinini", "periodo": resumen["periodo"]}, headers=ANA).json()
+    exactas = [p for p in lote["partidas"] if p["estado"] == "Conciliado Automático"]
+
+    assert resumen["periodo"] == "2026-10" and resumen["empresa"] == "" and resumen["cuit_empresa"] == ""
+    assert resumen["partidas_exactas"] == len(exactas)
+    assert resumen["partidas_a_revisar"] == len(lote["partidas"]) - len(exactas)
+    # Los pares que no son exactos quedan marcados, con lo mismo que dirá el lote.
+    assert sum(1 for c in estado["detalle"]["conciliados"] if not c["observacion"]) == len(exactas)
+
+
+def test_quitar_una_fila_baja_el_contador_de_excepciones(ruta_arca, ruta_mayor):
+    lote = _lote(ruta_arca, ruta_mayor)
+    fila = next(p for p in lote["partidas"] if p["estado"] != "Conciliado Automático")
+    antes = cliente.get("/api/lotes", headers=ANA).json()["lotes"][0]["resumen"]["excepciones"]
+    r = cliente.patch(f"/api/lotes/{lote['lote']['id']}/partidas/{fila['clave']}",
+                      json={"version": lote["lote"]["version_vigente"], "excluida": True, "comentario": "Es de otro período"}, headers=ANA)
+    assert r.status_code == 200, r.text
+    assert cliente.get("/api/lotes", headers=ANA).json()["lotes"][0]["resumen"]["excepciones"] == antes - 1

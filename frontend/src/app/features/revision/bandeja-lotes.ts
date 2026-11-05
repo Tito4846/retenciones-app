@@ -3,13 +3,13 @@ import { RouterLink } from '@angular/router';
 import { EstadoLote, LoteListado } from '../../core/models/lote.models';
 import { LotesStore } from '../../core/services/lotes.store';
 import { SesionService } from '../../core/services/sesion.service';
-import { ESTADOS, periodo, pesos } from './revision.util';
+import { CONCILIADO, ESTADOS, periodo, pesos } from './revision.util';
 
 type Bandeja = 'mias' | 'espera' | 'cerrados';
 
 const PESTANAS: { id: Bandeja; titulo: string }[] = [
-  { id: 'mias', titulo: 'Mis tareas' },
-  { id: 'espera', titulo: 'Esperando revisión' },
+  { id: 'mias', titulo: 'Mis Tareas' },
+  { id: 'espera', titulo: 'Esperando Revisión' },
   { id: 'cerrados', titulo: 'Cerrados' },
 ];
 
@@ -53,6 +53,9 @@ const PESTANAS: { id: Bandeja; titulo: string }[] = [
               <p class="min-w-0 truncate text-xs text-muted" [title]="impuestos(l)">{{ impuestos(l) }}</p>
               <p class="shrink-0 font-semibold tabular-nums">{{ pesos(monto(l)) }}</p>
             </div>
+            @if (excepciones(l); as n) {
+              <p class="mt-1 text-xs font-semibold text-amber-800">{{ n }} {{ n === 1 ? 'excepción' : 'excepciones' }}</p>
+            }
             <p class="mt-1 truncate text-xs" [class]="paraMi ? 'font-semibold text-amber-800' : 'text-muted'">
               {{ situacion(l) }}
               @if (l.observaciones_abiertas) {
@@ -70,7 +73,7 @@ const PESTANAS: { id: Bandeja; titulo: string }[] = [
           } @else if (store.lotes().length) {
             No hay lotes acá.
           } @else {
-            Todavía no hay lotes. En <a routerLink="/conciliacion" class="font-semibold text-brand-700 underline">Conciliación</a>, tocá «Crear lote para revisión».
+            Todavía no hay lotes. En <a routerLink="/conciliacion" class="font-semibold text-brand-700 underline">Conciliación</a>, tocá «Generar Lote para Revisión».
           }
         </li>
       }
@@ -138,6 +141,12 @@ export class BandejaLotes {
 
   protected monto(l: LoteListado): string {
     return l.resumen.importe_declarado ?? l.resumen.importe_fisco ?? l.total_fisco;
+  }
+
+  protected excepciones(l: LoteListado): number {
+    const { excepciones, por_estado } = l.resumen;
+    if (excepciones !== undefined) return excepciones;
+    return Object.entries(por_estado ?? {}).reduce((n, [estado, cuantas]) => (estado === CONCILIADO ? n : n + cuantas), 0);
   }
 
   /** En una línea, en qué está el lote y quién tiene que moverlo. */

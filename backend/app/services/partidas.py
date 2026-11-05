@@ -98,6 +98,42 @@ def _indice(identificador: str) -> int:
     return int(identificador[1:])
 
 
+def _estado_par(c: dict, r: dict, m: dict, tolerancia: int) -> tuple[str, str]:
+    """(estado, código) de un par conciliado. r y m son las filas normalizadas de cada lado."""
+    dias = c.get("diferencia_dias")
+    if c["criterio"] == CRITERIO_MANUAL:
+        return PENDIENTE, "P04"
+    if dec(c["diferencia_importe"]) != 0:
+        return DIFERENCIA, "D01"
+    if r["cuit"] and m["cuit"] and r["cuit"] != m["cuit"]:
+        return PENDIENTE, "P02"
+    if dias is not None and dias > tolerancia:
+        return PENDIENTE, "P03"
+    if c["criterio"] != CRITERIO_COMPROBANTE:
+        return PENDIENTE, "P01"
+    return CONCILIADO, ""
+
+
+def marcar_exactos(resultado: dict, entrada) -> dict:
+    """
+    Anota en cada par por qué no concilió exacto (`observacion`, None si lo hizo) y
+    devuelve cuántas partidas cuadran y cuántas va a tener que justificar el lote:
+    son las mismas cuentas que `armar`, así el tablero y el lote dan igual.
+    """
+    tolerancia = resultado["resumen"].get("tolerancia_dias", settings.TOLERANCIA_DIAS)
+    detalle = resultado["detalle"]
+    mayor = [normalizar_mayor(m) for m in entrada.mayor.retenciones]
+    arca = [normalizar_arca(r) for r in entrada.arca]
+    exactas = 0
+    for c in detalle["conciliados"]:
+        estado, codigo = _estado_par(c, arca[_indice(c["id"])], mayor[_indice(c["id_mayor"])], tolerancia)
+        c["observacion"] = CODIGOS.get(codigo)
+        exactas += estado == CONCILIADO
+    observadas = len(detalle["conciliados"]) - exactas
+    return {"partidas_exactas": exactas,
+            "partidas_a_revisar": observadas + len(detalle["faltan_en_mayor"]) + len(detalle["faltan_en_arca"])}
+
+
 def armar(resultado: dict, entrada) -> list[dict]:
     """Las partidas (en el orden del Excel) a partir del cruce y lo leído de cada lado."""
     tolerancia = resultado["resumen"].get("tolerancia_dias", settings.TOLERANCIA_DIAS)
@@ -117,20 +153,7 @@ def armar(resultado: dict, entrada) -> list[dict]:
     for c in detalle["conciliados"]:
         r = arca[_indice(c["id"])]
         m = mayor[_indice(c["id_mayor"])]
-        dias = c.get("diferencia_dias")
-        cuit_distinta = bool(r["cuit"] and m["cuit"] and r["cuit"] != m["cuit"])
-        if c["criterio"] == CRITERIO_MANUAL:
-            estado, codigo = PENDIENTE, "P04"
-        elif dec(c["diferencia_importe"]) != 0:
-            estado, codigo = DIFERENCIA, "D01"
-        elif cuit_distinta:
-            estado, codigo = PENDIENTE, "P02"
-        elif dias is not None and dias > tolerancia:
-            estado, codigo = PENDIENTE, "P03"
-        elif c["criterio"] != CRITERIO_COMPROBANTE:
-            estado, codigo = PENDIENTE, "P01"
-        else:
-            estado, codigo = CONCILIADO, ""
+        estado, codigo = _estado_par(c, r, m, tolerancia)
         partidas.append({
             "lado": "F", "id": c["id"], "estado": estado, "codigo": codigo, "criterio": c["criterio"],
             "cuit": c["cuit"], "razon_social": c["razon_social"], "impuesto": c.get("impuesto") or "",
@@ -231,6 +254,7 @@ def resumen(partidas: list[dict]) -> dict:
         "importe_sistema": netos["sistema"],
         "importe_declarado": netos["declarado"],
         "partidas": len(partidas),
+        "excepciones": sum(1 for p in partidas if p["estado"] != CONCILIADO and not p.get("excluida")),
         "por_estado": {e: por_estado.get(e, 0) for e in ESTADOS},
         "importe_fisco": str(sum((Decimal(p["importe_fisco"] or "0") for p in partidas), Decimal("0.00"))),
         "importe_erp": str(sum((Decimal(p["importe_erp"] or "0") for p in partidas), Decimal("0.00"))),
