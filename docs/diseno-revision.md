@@ -372,22 +372,25 @@ tiene errores bloqueantes, no se corren las siguientes. Nada se guarda hasta que
 todo pasa (transacción); un rechazo se registra en auditoría como
 `carga_rechazada` con el detalle.
 
-| # | Etapa | Controles | Severidad |
+El Excel es interno y solo trae trabajo: de cada fila, buscada por su `Clave`, se
+toman Justificación, Comentario, Importe ajustado y Excluida. El resto sale de la
+versión vigente, así que tocarlo no cambia nada: se ignora y queda como aviso.
+
+| # | Etapa | Rechaza la carga | Solo avisa |
 |---|---|---|---|
-| 0 | Transporte | Tamaño ≤ `MAX_MB_ARCHIVO`; extensión `.xlsx` y firma ZIP real; sin macros (`.xlsm`/vbaProject rechazado); SHA-256 distinto al de la versión vigente | error |
-| 1 | Estructura | Existen `CONCILIACION` y `_META`; encabezados exactos y en orden; `_META.lote_id` = este lote; `version_base` = vigente (si no: "bajaste v2 y ya hay v3") | error |
-| 2 | Sintaxis por fila | CUIT con dígito verificador; fechas válidas y dentro del período (± tolerancia); importes numéricos con 2 decimales; Estado/Código/Justificación dentro del catálogo | error |
-| 3 | Integridad | Sin claves duplicadas; mismas claves que la versión base (no se agregan ni quitan filas a mano: eso se hace re-conciliando); `hash_fila` de columnas bloqueadas igual al de `_META` (detecta celdas alteradas aunque se haya quitado la protección); sin fórmulas fuera de las celdas de totales; totales del pie recalculados en el servidor (no se confía en el valor cacheado) | error |
-| 4 | Reglas de negocio | Partida ≠ Conciliado Automático sin justificación → error para enviar, advertencia al subir; `ajuste`/diferencia justificada sin adjunto → idem; comentario obligatorio en `Diferencia de Monto` | error / advertencia |
-| 5 | Cuadre | Σ ERP = `total_libro_erp` y Σ Fisco = `total_fisco` al centavo (`Decimal`, `ROUND_HALF_EVEN` solo al mostrar); motivos de la diferencia suman la diferencia | error |
+| 0 | Archivo | Tamaño > `MAX_MB_ARCHIVO`; no es `.xlsx`; tiene macros; es el mismo archivo que la vigente | |
+| 1 | Lote | Falta `CONCILIACION` o su columna `Clave`; `_META.lote_id` es de otro lote; ninguna fila es del lote | Salió de una versión anterior |
+| 2 | Filas | | Columnas bloqueadas tocadas, filas agregadas, repetidas o quitadas, ajuste sobre una fila conciliada o que no es un número |
+| 4 | Negocio | | Justificaciones faltantes |
 
-Resultado:
+La pantalla muestra todas las excepciones, también las ya justificadas, con lo que
+escribió quien las trabajó: es lo que evalúa el supervisor. Arriba, quién subió la
+versión vigente, cuándo, cuántas partidas modificó, la nota y los comprobantes.
 
-```json
-{ "valida": false, "etapa_fallida": 3,
-  "errores": [ { "etapa": 3, "codigo": "COLUMNA_ALTERADA", "hoja": "CONCILIACION", "fila": 14, "columna": "Importe ERP", "esperado": "15000.00", "encontrado": "1500.00" } ],
-  "advertencias": [ … ], "resumen": { "filas": 128, "cuadre_erp": "0.00", "cuadre_fisco": "0.00" } }
-```
+Enviar y aprobar no exigen justificaciones, comprobantes ni diferencia neta en cero:
+esos datos llegan como `pendientes` y los evalúa quien aprueba. Lo que había
+pendiente al aprobar queda en la auditoría. Sigue separada la función de preparar
+y la de aprobar: quien cargó el lote no lo aprueba.
 
 ### 4.3 Otros controles
 

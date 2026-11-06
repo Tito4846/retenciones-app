@@ -149,8 +149,8 @@ El diseño completo está en [docs/diseno-revision.md](docs/diseno-revision.md).
   La diferencia neta (ARCA contra Libro Mayor) tiene que quedar en $ 0,00 para enviar y para aprobar:
   se resuelve con la columna **Importe ajustado** o marcando **Excluida** con un motivo. Los importes de las
   fuentes no se tocan: el ajuste va aparte y una fila excluida sigue registrada.
-- El empleado también puede bajar el Excel, trabajarlo y subirlo como versión nueva: pasa por una validación de 6 etapas
-  (archivo, estructura, sintaxis, integridad de columnas bloqueadas, reglas, cuadre al centavo).
+- El empleado también puede bajar el Excel, trabajarlo y subirlo como versión nueva: de cada fila, buscada por su Clave,
+  se toman las columnas de trabajo. Lo demás sale de la versión vigente: lo que se haya tocado se ignora y se avisa.
 - Al enviarlo, la versión queda sellada. Un supervisor que **no** lo haya preparado lo toma,
   tilda los controles y lo devuelve (con motivo obligatorio: vuelve a quien lo preparó) o lo aprueba.
   Mientras lo revisa puede corregirlo sin devolverlo: eso arma una versión nueva, la anterior queda

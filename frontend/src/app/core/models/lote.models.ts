@@ -78,6 +78,15 @@ export interface LoteListado extends Lote {
   ultimo_rechazo: string | null;
   /** Los impuestos de sus partidas, separados por coma. */
   impuestos: string | null;
+  /** Quién armó la versión vigente y cómo. */
+  autor_version: string | null;
+  origen_version: Version['origen'] | null;
+  version_utc: string | null;
+  version_correccion: number | null;
+  /** Excepciones que siguen sin justificación o sin comentario. */
+  sin_completar: number;
+  comprobantes: number;
+  ultimo_envio: string | null;
 }
 
 export interface ResumenVersion {
@@ -110,6 +119,7 @@ export interface Validacion {
   errores?: ErrorValidacion[];
   advertencias?: ErrorValidacion[];
   migrado?: boolean;
+  resumen?: { cambiadas?: number };
 }
 
 export interface Version {
@@ -211,7 +221,10 @@ export interface DetalleLote {
   observaciones: Observacion[];
   decisiones: Decision[];
   exportaciones: Exportacion[];
+  /** Lo que impide enviar o aprobar. */
   compuertas: { enviar: ErrorValidacion[]; aprobar: ErrorValidacion[] };
+  /** Lo que quedó sin resolver: no frena, lo evalúa quien aprueba. */
+  pendientes: ErrorValidacion[];
 }
 
 export interface Catalogo {
@@ -228,6 +241,8 @@ export interface Catalogo {
   evidencia_permitida: string[];
   evidencia_max_mb: number;
   motivo_minimo: number;
+  /** El servidor deja borrar del todo los lotes cerrados (para probar). */
+  eliminar_cerrados: boolean;
 }
 
 export interface EventoAuditoria {

@@ -236,3 +236,33 @@ def test_encabezados_de_seguridad():
     assert r.headers["x-content-type-options"] == "nosniff"
     assert r.headers["x-frame-options"] == "DENY"
     assert r.headers["cache-control"] == "no-store"
+
+
+def test_una_base_vieja_recibe_la_columna_del_desafio(tmp_path):
+    import sqlite3
+
+    from app.core import db
+
+    conexion = sqlite3.connect(tmp_path / "vieja.db")
+    conexion.row_factory = sqlite3.Row
+    conexion.executescript(db.ESQUEMA + db._TRIGGERS_APROBADO)
+    conexion.execute("ALTER TABLE desafio DROP COLUMN abre_sesion")
+    db._agregar_columnas(conexion)
+    fila = next(f for f in conexion.execute("PRAGMA table_info(desafio)") if f["name"] == "abre_sesion")
+    assert fila["dflt_value"] == "1"
+
+
+def test_un_error_interno_llega_al_navegador_con_su_mensaje(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    def falla(*_):
+        raise IndexError("No item with that key")
+
+    monkeypatch.setattr("app.api.auth.cuentas.cambiar_clave_inicial", falla)
+    cliente_navegador = TestClient(app, raise_server_exceptions=False)
+    r = cliente_navegador.post("/api/auth/cambiar-clave-inicial", json={"desafio": "x" * 20, "nueva": "Una-Clave-Larga-2026"},
+                               headers={"Origin": "http://localhost:4200"})
+    assert r.status_code == 500 and r.json()["detail"]["codigo"] == "ERROR_INTERNO"
+    assert r.headers["access-control-allow-origin"] == "http://localhost:4200"

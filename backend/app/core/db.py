@@ -295,6 +295,7 @@ _COLUMNAS_NUEVAS = (
     ("partida", "editado_por", "TEXT NOT NULL DEFAULT ''"),
     ("partida", "editado_rol", "TEXT NOT NULL DEFAULT ''"),
     ("partida", "editado_utc", "TEXT"),
+    ("desafio", "abre_sesion", "INTEGER NOT NULL DEFAULT 1"),
 )
 
 _iniciadas: set[Path] = set()

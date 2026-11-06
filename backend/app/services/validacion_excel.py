@@ -1,18 +1,17 @@
 """
-Pipeline de validación del Excel que vuelve subido (una versión nueva del lote).
+Lectura del Excel que vuelve subido (una versión nueva del lote).
 
-Etapas en orden; dentro de cada una se juntan todos los errores para que el
-analista corrija todo de una vez. Si una etapa tiene errores, las siguientes
-no corren. La validación no escribe nada: devuelve el resultado y, si pasó,
-las partidas de la versión nueva.
+El Excel es interno y solo trae trabajo: de cada fila, buscada por su Clave, se
+toman las columnas libres (Justificación, Comentario, Importe ajustado y
+Excluida). Todo lo demás sale de la versión vigente, así que no hace falta
+vigilarlo: lo que se haya tocado afuera se ignora y se avisa, sin frenar la carga.
 
-0 Transporte   tamaño, firma ZIP, sin macros, distinto de la versión vigente
-1 Estructura   hojas, encabezados, lote y versión base de _META
-2 Sintaxis     CUIT, fechas, importes y catálogos por fila
-3 Integridad   duplicados, mismas filas que la base, columnas bloqueadas sin
-               tocar, sin fórmulas fuera de los totales
-4 Negocio      justificaciones y comentarios (advertencias: se exigen al enviar)
-5 Cuadre       totales al centavo contra los de las fuentes
+Se rechaza solo lo que impide usar el archivo:
+
+0 Archivo   tamaño, firma ZIP, sin macros, distinto de la versión vigente
+1 Lote      hoja CONCILIACION con su columna Clave, y que sea de este lote
+
+Lo que falte completar no frena nada: lo evalúa quien aprueba el lote.
 """
 
 import hashlib
@@ -105,158 +104,124 @@ def validar(contenido: bytes, lote: dict, base: dict, partidas_base: list[dict])
     if r.corte(0):
         return r, []
 
-    # 1) Estructura
+    # 1) Que sea de este lote
     try:
-        libro = load_workbook(io.BytesIO(contenido), data_only=False)
+        libro = load_workbook(io.BytesIO(contenido), data_only=True)
     except Exception:
         r.error(1, "ILEGIBLE", "No se pudo abrir el Excel.")
         r.corte(1)
         return r, []
-    for nombre in (X.HOJA, X.HOJA_META):
-        if nombre not in libro.sheetnames:
-            r.error(1, "FALTA_HOJA", f"Falta la hoja {nombre}: subí el Excel que bajaste del lote, sin quitarle hojas.", hoja=nombre)
+    if X.HOJA not in libro.sheetnames:
+        r.error(1, "FALTA_HOJA", f"No encontré la hoja {X.HOJA}: subí el Excel que bajaste de este lote.", hoja=X.HOJA)
+        r.corte(1)
+        return r, []
+    hoja = libro[X.HOJA]
+    if X.HOJA_META in libro.sheetnames:
+        meta = _meta(libro[X.HOJA_META])
+        if meta.get("lote_id") not in (None, lote["id"]):
+            r.error(1, "OTRO_LOTE", "El archivo es de otro lote.", hoja=X.HOJA_META)
+        elif meta.get("version") not in (None, base["numero"], str(base["numero"])):
+            r.aviso(1, "VERSION_VIEJA", f"El archivo salió de la v{meta['version']} y la vigente era la v{base['numero']}: "
+                    "se aplicó lo que traía.", hoja=X.HOJA_META)
+    if hoja.max_row > MAX_FILAS:
+        r.error(1, "DEMASIADAS_FILAS", f"La hoja tiene más de {MAX_FILAS} filas.", hoja=X.HOJA)
+    posicion = {c.value: c.column for c in hoja[1] if c.value}
+    if "Clave" not in posicion:
+        r.error(1, "SIN_CLAVE", "Falta la columna «Clave»: es la que identifica cada partida.", hoja=X.HOJA, columna="Clave")
     if r.corte(1):
         return r, []
-    hoja, meta_hoja = libro[X.HOJA], libro[X.HOJA_META]
+
+    # 2) Las filas: en cualquier orden, y las que no vengan quedan como estaban
+    por_clave = {p["clave"]: p for p in partidas_base}
+    leidas: dict[str, dict] = {}
+    numeros: dict[str, int] = {}
+    for numero in range(2, hoja.max_row + 1):
+        clave = hoja.cell(row=numero, column=posicion["Clave"]).value
+        clave = str(clave).strip() if clave is not None else ""
+        if not clave or clave == X.TITULO_TOTALES:
+            continue
+        original = por_clave.get(clave)
+        if original is None:
+            r.aviso(2, "FILA_AGREGADA", f"Se ignoró la fila {numero}: no es una partida del lote.", hoja=X.HOJA, fila=numero)
+            continue
+        if clave in leidas:
+            r.aviso(2, "DUPLICADA", f"Se ignoró la fila {numero}: repite la fila {numeros[clave]}.", hoja=X.HOJA, fila=numero)
+            continue
+        fila = {campo: X.a_texto(campo, hoja.cell(row=numero, column=posicion[titulo]).value)
+                for titulo, campo, _ in X.COLUMNAS if titulo in posicion}
+        leidas[clave], numeros[clave] = fila, numero
+        _revisar_ajuste(r, fila, numero)
+        tocadas = [_titulo(c) for c in P.CAMPOS_BLOQUEADOS if c in fila and (fila[c] or "") != (original[c] or "")]
+        if tocadas:
+            r.aviso(2, "COLUMNA_ALTERADA", f"Fila {numero}: se mantuvo el dato original de {_lista(tocadas)}.", hoja=X.HOJA, fila=numero)
+    if not leidas:
+        r.error(1, "OTRO_LOTE", "El archivo no tiene ninguna partida de este lote.", hoja=X.HOJA)
+    if r.corte(1):
+        return r, []
+    if faltantes := len(por_clave) - len(leidas):
+        r.aviso(2, "FILA_QUITADA", f"{_cantidad(faltantes)} no venía en el Excel: quedó como estaba.", hoja=X.HOJA)
+
+    nuevas = [_aplicar(p, leidas.get(p["clave"]), numeros.get(p["clave"]), r) for p in partidas_base]
+
+    # No frena: lo evalúa quien aprueba.
+    for p in nuevas:
+        for codigo, mensaje in requisitos(p):
+            r.aviso(4, codigo, mensaje, hoja=X.HOJA, fila=numeros.get(p["clave"]), clave=p["clave"])
+
+    r.resumen = {**P.resumen(nuevas), "filas": len(nuevas),
+                 "cambiadas": sum(1 for p in nuevas if any(p[k] != por_clave[p["clave"]][k] for k in X.COLUMNAS_LIBRES))}
+    return r, nuevas
+
+
+def _meta(hoja) -> dict:
     meta = {}
-    for fila in meta_hoja.iter_rows(values_only=True):
+    for fila in hoja.iter_rows(values_only=True):
         if fila and fila[0] == "clave":
             break
         if fila and fila[0]:
             meta[str(fila[0])] = fila[1]
-    _revisar_encabezados(r, [c.value for c in hoja[1]][: len(X.ENCABEZADOS)])
-    if meta.get("formato") != X.FORMATO:
-        r.error(1, "FORMATO", "El archivo no tiene el formato de un lote.", hoja=X.HOJA_META)
-    if meta.get("lote_id") != lote["id"]:
-        r.error(1, "OTRO_LOTE", "El archivo es de otro lote.", hoja=X.HOJA_META)
-    elif str(meta.get("version")) != str(base["numero"]):
-        r.error(1, "VERSION_VIEJA", f"Trabajaste sobre v{meta.get('version')} y la vigente es v{base['numero']}: bajá la vigente y volvé a cargar los cambios.", hoja=X.HOJA_META)
-    if hoja.max_row > MAX_FILAS:
-        r.error(1, "DEMASIADAS_FILAS", f"La hoja tiene más de {MAX_FILAS} filas.", hoja=X.HOJA)
-    if r.corte(1):
-        return r, []
-
-    # Filas de datos: hasta la primera vacía (después vienen los totales).
-    cantidad = int(meta.get("filas") or 0)
-    leidas: list[tuple[int, dict]] = []
-    for numero in range(2, hoja.max_row + 1):
-        celdas = [hoja.cell(row=numero, column=c).value for c in range(1, len(X.COLUMNAS) + 1)]
-        if all(v is None or (isinstance(v, str) and not v.strip()) for v in celdas):
-            break
-        if celdas[0] == X.TITULO_TOTALES:
-            break
-        leidas.append((numero, {campo: X.a_texto(campo, v) for (_, campo, _), v in zip(X.COLUMNAS, celdas, strict=True)}))
-
-    # 2) Sintaxis por fila
-    for numero, f in leidas:
-        if f["estado"] not in P.ESTADOS:
-            r.error(2, "ESTADO_INVALIDO", f"{_formato('Estado', numero)} tiene un estado desconocido («{f['estado']}»).", hoja=X.HOJA, fila=numero, columna="Estado")
-        if f["codigo"] and f["codigo"] not in P.CODIGOS:
-            r.error(2, "CODIGO_INVALIDO", f"{_formato('Código', numero)} tiene un código desconocido («{f['codigo']}»).", hoja=X.HOJA, fila=numero, columna="Código")
-        if f["justificacion"] and f["justificacion"] not in P.JUSTIFICACIONES:
-            r.error(2, "JUSTIFICACION_INVALIDA", f"{_formato('Justificación', numero)} dice «{f['justificacion']}», que no está en la lista.", hoja=X.HOJA, fila=numero, columna="Justificación")
-        if f["cuit"] and not P.cuit_valida(f["cuit"]):
-            r.aviso(2, "CUIT_INVALIDA", f"La CUIT {f['cuit']} tiene el dígito verificador mal.", hoja=X.HOJA, fila=numero, columna="CUIT")
-        for campo in X.COLUMNAS_FECHA:
-            valor = f[campo]
-            if valor and len(valor) != 10:
-                r.error(2, "FECHA_INVALIDA", f"{_formato(_titulo(campo), numero)} no tiene una fecha válida («{valor}»).", hoja=X.HOJA, fila=numero, columna=_titulo(campo))
-        for campo in (*X.COLUMNAS_IMPORTE, "importe_ajustado"):
-            valor = f[campo]
-            if valor is None:
-                continue
-            problema = f"contiene letras («{valor}»)" if X.tiene_letras(valor) else None
-            try:
-                Decimal(valor)
-            except InvalidOperation:
-                problema = problema or f"no tiene un importe válido («{valor}»)"
-            else:
-                if campo == "importe_ajustado" and Decimal(valor) < 0:
-                    problema = f"no puede ser negativa («{valor}»)"
-            if problema:
-                r.error(2, "IMPORTE_INVALIDO", f"{_formato(_titulo(campo), numero)} {problema}.", hoja=X.HOJA, fila=numero, columna=_titulo(campo))
-        if f["excluida"] and f["excluida"].lower() not in ("sí", "si"):
-            r.error(2, "EXCLUIDA_INVALIDA", f"{_formato('Excluida', numero)} dice «{f['excluida']}»: escribí Sí o dejala vacía.", hoja=X.HOJA, fila=numero, columna="Excluida")
-        if len(f["comentario"] or "") > 2000:
-            r.error(2, "COMENTARIO_LARGO", f"{_formato('Comentario', numero)} supera los 2000 caracteres.", hoja=X.HOJA, fila=numero, columna="Comentario")
-    if r.corte(2):
-        return r, []
-
-    # 3) Integridad
-    por_clave = {p["clave"]: p for p in partidas_base}
-    vistas: dict[str, int] = {}
-    for numero, f in leidas:
-        clave = f["clave"]
-        if clave in vistas:
-            r.error(3, "DUPLICADA", f"La fila {numero} repite la partida de la fila {vistas[clave]}.", hoja=X.HOJA, fila=numero, columna="Clave")
-            continue
-        vistas[clave] = numero
-        original = por_clave.get(clave)
-        if original is None:
-            r.error(3, "FILA_AGREGADA", f"La fila {numero} no está en el lote original: las partidas se agregan volviendo a conciliar, no a mano.", hoja=X.HOJA, fila=numero)
-            continue
-        if P.hash_fila(f) != original["hash_fila"]:
-            for _, campo, _ in X.COLUMNAS:
-                if campo in P.CAMPOS_BLOQUEADOS and (f[campo] or "") != (original[campo] or ""):
-                    r.error(3, "COLUMNA_ALTERADA", f"Se modificó la columna bloqueada «{_titulo(campo)}» en la fila {numero}: "
-                            f"decía «{original[campo] or 'vacío'}» y ahora dice «{f[campo] or 'vacío'}».", hoja=X.HOJA,
-                            fila=numero, columna=_titulo(campo), esperado=original[campo], encontrado=f[campo])
-        excluida = 1 if f["excluida"] else 0
-        if original["estado"] == P.CONCILIADO and (f["importe_ajustado"], excluida) != (original["importe_ajustado"], original["excluida"]):
-            r.error(3, "CONCILIADA", f"La fila {numero} concilió sola: no se ajusta ni se excluye.", hoja=X.HOJA, fila=numero)
-        if excluida and not (f["comentario"] or "").strip():
-            r.error(3, "MOTIVO", f"La fila {numero} está excluida: contá el motivo en la columna «Comentario».", hoja=X.HOJA, fila=numero, columna="Comentario")
-    for clave, original in por_clave.items():
-        if clave not in vistas:
-            r.error(3, "FILA_QUITADA", f"Falta la partida de {original['razon_social'] or original['cuit']} por {original['importe_fisco'] or original['importe_erp']}.",
-                    hoja=X.HOJA, clave=clave)
-    if cantidad != len(partidas_base):
-        r.error(3, "META_ALTERADA", "La hoja _META no coincide con el lote.", hoja=X.HOJA_META)
-    fila_totales = X.fila_de_totales(len(leidas))
-    permitidas = {f"{X._letra(c)}{fila_totales}" for c in X.COLUMNAS_IMPORTE}
-    for fila in hoja.iter_rows():
-        for celda in fila:
-            if celda.data_type == "f" and celda.coordinate not in permitidas:
-                r.error(3, "FORMULA", f"La celda {celda.coordinate} tiene una fórmula: cargá el valor directamente.", hoja=X.HOJA, fila=celda.row, columna=celda.column_letter)
-    if r.corte(3):
-        return r, []
-
-    nuevas = []
-    for _, f in leidas:
-        original = por_clave[f["clave"]]
-        nuevas.append({**original, "justificacion": f["justificacion"] or "", "comentario": (f["comentario"] or "").strip(),
-                       "importe_ajustado": f["importe_ajustado"], "excluida": 1 if f["excluida"] else 0})
-
-    # 4) Negocio (se exige al enviar; acá avisa)
-    for numero, p in zip((n for n, _ in leidas), nuevas, strict=True):
-        for codigo, mensaje in requisitos(p):
-            r.aviso(4, codigo, mensaje, hoja=X.HOJA, fila=numero, clave=p["clave"])
-
-    # 5) Cuadre (recalculado acá: no se confía en los totales que trae el Excel)
-    for e in cuadre(nuevas, base["total_libro_erp"], base["total_fisco"]):
-        r.error(5, e["codigo"], e["mensaje"], hoja=X.HOJA, fila=fila_totales)
-    r.corte(5)
-    r.resumen = {**P.resumen(nuevas), "filas": len(nuevas),
-                 "cambiadas": sum(1 for p in nuevas if any(p[k] != por_clave[p["clave"]][k] for k in X.COLUMNAS_LIBRES))}
-    return r, nuevas if not r.errores else []
+    return meta
 
 
-def _formato(columna: str, fila: int) -> str:
-    return f"Error de formato: la columna «{columna}» en la fila {fila}"
-
-
-def _revisar_encabezados(r: Resultado, encontrados: list) -> None:
-    """Dice qué columna se tocó: «no son las originales» no le sirve a nadie para arreglarlo."""
-    if encontrados == X.ENCABEZADOS:
+def _revisar_ajuste(r: Resultado, fila: dict, numero: int) -> None:
+    """Con el ajuste se hacen cuentas: si no es un número se ignora y queda el que estaba."""
+    valor = fila.get("importe_ajustado")
+    if valor is None:
         return
-    faltan = [t for t in X.ENCABEZADOS if t not in encontrados]
-    sobran = [t for t in encontrados if t is not None and t not in X.ENCABEZADOS]
-    for titulo in faltan:
-        r.error(1, "ENCABEZADOS", f"Se eliminó la columna original «{titulo}».", hoja=X.HOJA, columna=titulo)
-    for titulo in sobran:
-        r.error(1, "ENCABEZADOS", f"Se agregó la columna «{titulo}», que no es del archivo original.", hoja=X.HOJA, columna=str(titulo))
-    if not faltan and not sobran:
-        r.error(1, "ENCABEZADOS", "Se cambió el orden de las columnas: dejalas como en el archivo original.", hoja=X.HOJA)
+    try:
+        Decimal(valor)
+    except InvalidOperation:
+        del fila["importe_ajustado"]
+        r.aviso(2, "IMPORTE_INVALIDO", f"Fila {numero}: se ignoró el Importe ajustado «{valor}», no es un número.",
+                hoja=X.HOJA, fila=numero, columna="Importe ajustado")
+
+
+def _aplicar(partida: dict, fila: dict | None, numero: int | None, r: Resultado) -> dict:
+    """La partida guardada con lo que trajo el Excel en las columnas libres."""
+    nueva = {**partida}
+    if fila is None:
+        return nueva
+    for campo in P.CAMPOS_EDITABLES:
+        if campo in fila:
+            nueva[campo] = (fila[campo] or "").strip()
+    cambios = {}
+    if "importe_ajustado" in fila:
+        cambios["importe_ajustado"] = fila["importe_ajustado"]
+    if "excluida" in fila:
+        cambios["excluida"] = int((fila["excluida"] or "").lower() not in ("", "no", "0"))
+    if partida["estado"] != P.CONCILIADO:
+        return {**nueva, **cambios}
+    if any(partida[k] != v for k, v in cambios.items()):
+        r.aviso(2, "CONCILIADA", f"Fila {numero}: concilió sola, así que no se ajustó ni se excluyó.", hoja=X.HOJA, fila=numero)
+    return nueva
+
+
+def _lista(titulos: list[str]) -> str:
+    return ", ".join(f"«{t}»" for t in titulos)
+
+
+def _cantidad(n: int) -> str:
+    return "1 partida" if n == 1 else f"{n} partidas"
 
 
 def _titulo(campo: str) -> str:

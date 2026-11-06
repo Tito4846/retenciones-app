@@ -3,7 +3,7 @@ import { RouterLink } from '@angular/router';
 import { EstadoLote, LoteListado } from '../../core/models/lote.models';
 import { LotesStore } from '../../core/services/lotes.store';
 import { SesionService } from '../../core/services/sesion.service';
-import { CONCILIADO, ESTADOS, periodo, pesos } from './revision.util';
+import { CONCILIADO, ESTADOS, hace, iniciales, periodo, pesos, quienArmo } from './revision.util';
 
 type Bandeja = 'mias' | 'espera' | 'cerrados';
 
@@ -53,8 +53,19 @@ const PESTANAS: { id: Bandeja; titulo: string }[] = [
               <p class="min-w-0 truncate text-xs text-muted" [title]="impuestos(l)">{{ impuestos(l) }}</p>
               <p class="shrink-0 font-semibold tabular-nums">{{ pesos(monto(l)) }}</p>
             </div>
+            @if (l.autor_version) {
+              <div class="mt-1.5 flex items-center gap-1.5 text-xs">
+                <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand-100 text-[10px] font-bold text-brand-700" aria-hidden="true">{{ iniciales(l.autor_version) }}</span>
+                <p class="min-w-0 truncate"><span class="font-semibold">{{ quien(l) }}</span> <span class="text-muted">· {{ cuando(l) }}</span></p>
+              </div>
+            }
             @if (excepciones(l); as n) {
-              <p class="mt-1 text-xs font-semibold text-amber-800">{{ n }} {{ n === 1 ? 'excepción' : 'excepciones' }}</p>
+              <p class="mt-1 text-xs">
+                <span class="font-semibold" [class]="l.sin_completar ? 'text-amber-800' : 'text-emerald-700'">
+                  {{ n }} {{ n === 1 ? 'excepción' : 'excepciones' }}{{ l.sin_completar ? ' · ' + l.sin_completar + ' sin completar' : ' · completas' }}
+                </span>
+                @if (l.comprobantes) { <span class="text-muted"> · {{ l.comprobantes === 1 ? '1 comprobante' : l.comprobantes + ' comprobantes' }}</span> }
+              </p>
             }
             <p class="mt-1 truncate text-xs" [class]="paraMi ? 'font-semibold text-amber-800' : 'text-muted'">
               {{ situacion(l) }}
@@ -87,6 +98,7 @@ export class BandejaLotes {
   protected readonly pestanas = PESTANAS;
   protected readonly pesos = pesos;
   protected readonly periodo = periodo;
+  protected readonly iniciales = iniciales;
 
   /** El lote elegido. null = todavía ninguno: se abre el primero de la lista. */
   readonly seleccion = model<string | null>(null);
@@ -109,7 +121,7 @@ export class BandejaLotes {
     return this.store.lotes().filter(
       (l) =>
         this.lugar(l) === bandeja &&
-        (!texto || `${l.empresa} ${l.cuit_empresa} ${l.periodo} ${l.maker_nombre} ${l.checker_nombre ?? ''}`.toLowerCase().includes(texto)),
+        (!texto || `${l.empresa} ${l.cuit_empresa} ${l.periodo} ${l.maker_nombre} ${l.autor_version ?? ''} ${l.checker_nombre ?? ''}`.toLowerCase().includes(texto)),
     );
   });
 
@@ -147,6 +159,15 @@ export class BandejaLotes {
     const { excepciones, por_estado } = l.resumen;
     if (excepciones !== undefined) return excepciones;
     return Object.entries(por_estado ?? {}).reduce((n, [estado, cuantas]) => (estado === CONCILIADO ? n : n + cuantas), 0);
+  }
+
+  protected quien(l: LoteListado): string {
+    return quienArmo(l.autor_version ?? '', l.origen_version ?? '', l.version_correccion ?? 0);
+  }
+
+  /** Si ya se envió, cuánto hace que espera; si no, cuánto hace que se tocó. */
+  protected cuando(l: LoteListado): string {
+    return l.estado === 'pendiente' && l.ultimo_envio ? `enviado ${hace(l.ultimo_envio)}` : hace(l.version_utc);
   }
 
   /** En una línea, en qué está el lote y quién tiene que moverlo. */

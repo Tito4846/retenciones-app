@@ -176,6 +176,24 @@ export class LotesStore {
     return this.accion(this.http.post<DetalleLote>(`${this.api}/${loteId}/anular`, { motivo }));
   }
 
+  eliminar(loteId: string): Observable<boolean> {
+    this.ocupado.set(true);
+    this.error.set(null);
+    return this.http.delete<void>(`${this.api}/${loteId}`).pipe(
+      map(() => {
+        this.detalle.set(null);
+        this.cargar();
+        this.cargarNotificaciones();
+        return true;
+      }),
+      catchError((e: unknown) => {
+        this.error.set(this.leerError(e, 'No se pudo eliminar el lote.'));
+        return of(false);
+      }),
+      finalize(() => this.ocupado.set(false)),
+    );
+  }
+
   exportar(loteId: string, tipo: string): void {
     this.error.set(null);
     this.http.post<{ id: string; nombre: string }>(`${this.api}/${loteId}/exportaciones`, { tipo }).subscribe({

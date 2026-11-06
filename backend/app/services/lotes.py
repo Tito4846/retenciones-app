@@ -234,8 +234,8 @@ def _faltas_partidas(partidas: list[dict]) -> list[dict]:
     return errores
 
 
-def compuertas(c: sqlite3.Connection, lote: dict, evidencia_nueva: int = 0) -> list[dict]:
-    """Lo que falta para enviar o aprobar (vacío = se puede). `evidencia_nueva`: los comprobantes que llegan en este pedido."""
+def compuertas(c: sqlite3.Connection, lote: dict) -> list[dict]:
+    """Lo que impide operar el lote (vacío = se puede enviar o aprobar). Lo demás lo evalúa quien lo aprueba: ver `pendientes`."""
     if lote["version_vigente"] == 0:
         return [{"codigo": "SIN_VERSION", "mensaje": "El lote no tiene versiones."}]
     version = _version_vigente(c, lote)
@@ -246,15 +246,22 @@ def compuertas(c: sqlite3.Connection, lote: dict, evidencia_nueva: int = 0) -> l
         errores.append({"codigo": "VERSION_INVALIDA", "mensaje": f"La versión v{version['numero']} no pasó la validación."})
     if not partidas:
         errores.append({"codigo": "SIN_PARTIDAS", "mensaje": "La versión no tiene partidas: regenerala desde una conciliación."})
-    errores += _faltas_partidas(partidas)
+    return errores + V.cuadre(partidas, version["total_libro_erp"], version["total_fisco"])
+
+
+def pendientes(c: sqlite3.Connection, lote: dict, evidencia_nueva: int = 0) -> list[dict]:
+    """Lo que quedó sin resolver: no frena nada, es lo que mira quien aprueba. `evidencia_nueva`: los comprobantes de este pedido."""
+    if lote["version_vigente"] == 0:
+        return []
+    partidas = _partidas(c, _version_vigente(c, lote)["id"])
+    avisos = _faltas_partidas(partidas)
     excepciones = any(p["estado"] != P.CONCILIADO and not p["excluida"] for p in partidas)
     if excepciones and not evidencia_nueva and not _adjuntos(c, lote["id"]):
-        errores.append({"codigo": "SIN_RESPALDO", "mensaje": "falta adjuntar al menos un comprobante"})
-    errores += V.cuadre(partidas, version["total_libro_erp"], version["total_fisco"])
+        avisos.append({"codigo": "SIN_RESPALDO", "mensaje": "sin comprobantes adjuntos"})
     neta = P.totales_netos(partidas)["neta"]
     if Decimal(neta) != 0:
-        errores.append({"codigo": "DIFERENCIA_NETA", "mensaje": f"La diferencia neta es {pesos(neta)}: tiene que quedar en $ 0,00."})
-    return errores
+        avisos.append({"codigo": "DIFERENCIA_NETA", "mensaje": f"La diferencia neta es {pesos(neta)}."})
+    return avisos
 
 
 # ----------------------------------------------------------------------
@@ -391,7 +398,7 @@ def desde_cruce(usuario: Usuario, tarea) -> dict:
         armado = regenerar(usuario, lote["id"], tarea, lote["version_vigente"])
     actual = armado["lote"]
     # Un lote devuelto espera que alguien atienda el motivo: no vuelve solo.
-    if actual["estado"] == "borrador" and partidas and not armado["compuertas"]["enviar"]:
+    if actual["estado"] == "borrador" and partidas and not armado["compuertas"]["enviar"] and not armado["pendientes"]:
         return enviar(usuario, actual["id"], actual["version_vigente"], "Enviado solo: la conciliación no dejó nada para resolver.")
     return armado
 
@@ -448,8 +455,8 @@ def subir_version(usuario: Usuario, lote_id: str, contenido: bytes, nombre: str,
         else:
             numero = base["numero"] + 1
             _firmar_cambios(partidas_base, nuevas, usuario)
-            # Se guarda regenerado: si no, al bajarlo su _META seguiría diciendo la versión anterior.
-            normalizado = excel_lote.generar(contenido, nuevas, _meta(lote, numero))
+            # Se regenera sobre la versión vigente: las hojas de origen no dependen de lo que traiga el archivo.
+            normalizado = excel_lote.generar(ruta_archivo(base["sha256"], ".xlsx").read_bytes(), nuevas, _meta(lote, numero))
             version = _insertar_version(c, lote, numero, "subido", normalizado, usuario, nuevas,
                                         (base["total_libro_erp"], base["total_fisco"]), resultado.a_dict(), nombre,
                                         correccion_checker=revisando)
@@ -659,7 +666,7 @@ def enviar(usuario: Usuario, lote_id: str, version: int, comentario: str = "",
         lote = _lote(c, lote_id)
         _exigir_estado(lote, *EDITABLES)
         _exigir_version(lote, version)
-        faltas = compuertas(c, lote, len(evidencia))
+        faltas = compuertas(c, lote)
         if faltas:
             raise _conflicto("Todavía no se puede enviar a revisión.", "COMPUERTA", faltas)
         vigente = _version_vigente(c, lote)
@@ -793,9 +800,11 @@ def aprobar(usuario: Usuario, lote_id: str, version: int, evidencia: list[tuple[
         if usuario.id in _autores(c, lote):
             raise _prohibido("No podés aprobar un lote que cargaste vos (segregación de funciones).", "SOD")
         _exigir_version(lote, version)
-        faltas = compuertas(c, lote, len(evidencia))
+        faltas = compuertas(c, lote)
         if faltas:
             raise _conflicto("Todavía no se puede aprobar.", "COMPUERTA", faltas)
+        # Queda escrito con qué se aprobó: la decisión es de quien aprueba, pero no se pierde.
+        abiertos = [e["mensaje"] for e in pendientes(c, lote, len(evidencia))]
         vigente = _version_vigente(c, lote)
         # Antes de calcular el sello: los comprobantes quedan dentro de hash_aprobado.
         _guardar_evidencia(c, usuario, lote_id, vigente["id"], evidencia)
@@ -807,7 +816,8 @@ def aprobar(usuario: Usuario, lote_id: str, version: int, evidencia: list[tuple[
         ahora = ahora_utc()
         c.execute("UPDATE lote SET estado = 'aprobado', hash_aprobado = ?, aprobado_utc = ?, actualizado_utc = ? WHERE id = ?",
                   (sello, ahora, ahora, lote_id))
-        auditoria.registrar(c, usuario, "aprobado", lote_id, vigente["id"], numero=vigente["numero"], hash_aprobado=sello)
+        auditoria.registrar(c, usuario, "aprobado", lote_id, vigente["id"], numero=vigente["numero"], hash_aprobado=sello,
+                            pendientes=abiertos)
         return _detalle(c, lote_id)
 
 
@@ -822,6 +832,41 @@ def anular(usuario: Usuario, lote_id: str, motivo: str) -> dict:
         c.execute("UPDATE lote SET estado = 'anulado', actualizado_utc = ? WHERE id = ?", (ahora_utc(), lote_id))
         auditoria.registrar(c, usuario, "anulado", lote_id, None, motivo=motivo.strip())
         return _detalle(c, lote_id)
+
+
+# Todo lo que cuelga de un lote, las hijas antes que las madres. La auditoría no está:
+# no se borra nunca y su cadena de hashes sigue valiendo sin el lote.
+_TABLAS_DEL_LOTE = ("notificacion", "observacion", "control_revision", "decision", "exportacion_fiscal",
+                    "adjunto", "partida", "lote_version")
+
+
+def eliminar(usuario: Usuario, lote_id: str) -> None:
+    """
+    Borra del todo un lote cerrado, para poder probar de cero. Los triggers que lo
+    impiden se sacan y se vuelven a crear en la misma transacción: si algo falla,
+    vuelven solos y el lote queda como estaba. En la auditoría queda quién lo borró.
+    """
+    _exigir_rol(usuario, "supervisor")
+    if not settings.PERMITIR_ELIMINAR_CERRADOS:
+        raise _prohibido("Eliminar lotes está desactivado en este servidor.", "ELIMINAR_DESACTIVADO")
+    with transaccion() as c:
+        lote = _lote(c, lote_id)
+        _exigir_estado(lote, "aprobado", "anulado")
+        if c.execute("SELECT 1 FROM lote WHERE rectifica_a = ?", (lote_id,)).fetchone():
+            raise _conflicto("Este lote tiene un rectificativo: eliminá primero ese.", "RECTIFICADO")
+        tablas = (*_TABLAS_DEL_LOTE, "lote")
+        lugares = ", ".join("?" * len(tablas))
+        triggers = c.execute(f"SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name IN ({lugares})", tablas).fetchall()
+        for trigger in triggers:
+            c.execute(f'DROP TRIGGER "{trigger["name"]}"')
+        for tabla in _TABLAS_DEL_LOTE:
+            c.execute(f"DELETE FROM {tabla} WHERE lote_id = ?", (lote_id,))
+        c.execute("DELETE FROM lote WHERE id = ?", (lote_id,))
+        for trigger in triggers:
+            c.execute(trigger["sql"])
+        auditoria.registrar(c, usuario, "lote_eliminado", lote_id, None, empresa=lote["empresa"], periodo=lote["periodo"],
+                            estado=lote["estado"], version=lote["version_vigente"], hash_aprobado=lote["hash_aprobado"])
+    soltar_archivos()
 
 
 # ----------------------------------------------------------------------
@@ -840,7 +885,7 @@ def _contenido_exportacion(tipo: str, lote: dict, partidas: list[dict]) -> bytes
             escritor.writerow([p["estado"], p["codigo"], p["cuit"], p["razon_social"], p["impuesto"], p["certificado"],
                                p["fecha_fisco"] or "", (p["importe_fisco"] or "").replace(".", ","), p["documento_erp"],
                                p["fecha_erp"] or "", (p["importe_erp"] or "").replace(".", ","), p["diferencia"].replace(".", ","),
-                               P.JUSTIFICACIONES.get(p["justificacion"], ""), p["comentario"],
+                               P.JUSTIFICACIONES.get(p["justificacion"], p["justificacion"]), p["comentario"],
                                (p["importe_ajustado"] or "").replace(".", ","), "Sí" if p["excluida"] else ""])
         return ("﻿" + salida.getvalue()).encode("utf-8")
     # ddjj_txt: las retenciones que ARCA informa (son las computables en la DDJJ),
@@ -918,7 +963,8 @@ def _detalle(c: sqlite3.Connection, lote_id: str) -> dict:
                      for o in c.execute("SELECT * FROM observacion WHERE lote_id = ? ORDER BY creado_utc", (lote_id,))]
     decisiones = [{**dict(d), "version": numeros.get(d["version_id"])}
                   for d in c.execute("SELECT * FROM decision WHERE lote_id = ? ORDER BY fecha_utc", (lote_id,))]
-    faltas = compuertas(c, lote) if lote["estado"] not in ("aprobado", "anulado") else []
+    abierto = lote["estado"] not in ("aprobado", "anulado")
+    faltas = compuertas(c, lote) if abierto else []
     return {
         "lote": {**lote, "autores": sorted(_autores(c, lote))},
         "versiones": versiones,
@@ -933,6 +979,7 @@ def _detalle(c: sqlite3.Connection, lote_id: str) -> dict:
             "enviar": faltas,
             "aprobar": faltas,
         },
+        "pendientes": pendientes(c, lote) if abierto else [],
     }
 
 
@@ -955,12 +1002,17 @@ def listar(estado: str | None = None, periodo: str | None = None, texto: str | N
     donde = f"WHERE {' AND '.join(condiciones)}" if condiciones else ""
     with transaccion(escritura=False) as c:
         filas = c.execute(
-            f"""SELECT l.*, v.resumen_json, v.sellada_utc,
+            f"""SELECT l.*, v.resumen_json, v.sellada_utc, v.autor_nombre AS autor_version, v.origen AS origen_version,
+                   v.creado_utc AS version_utc, v.correccion_checker AS version_correccion,
+                   (SELECT COUNT(*) FROM partida p WHERE p.version_id = v.id AND p.estado <> ? AND p.excluida = 0
+                      AND (p.justificacion = '' OR TRIM(p.comentario) = '')) AS sin_completar,
+                   (SELECT COUNT(*) FROM adjunto a WHERE a.lote_id = l.id AND a.retirado_utc IS NULL) AS comprobantes,
+                   (SELECT fecha_utc FROM decision d WHERE d.lote_id = l.id AND d.tipo = 'envio' ORDER BY fecha_utc DESC LIMIT 1) AS ultimo_envio,
                    (SELECT GROUP_CONCAT(DISTINCT p.impuesto) FROM partida p WHERE p.version_id = v.id AND p.impuesto <> '') AS impuestos,
                    (SELECT COUNT(*) FROM observacion o WHERE o.lote_id = l.id AND o.resuelta_utc IS NULL) AS observaciones_abiertas,
                    (SELECT motivo FROM decision d WHERE d.lote_id = l.id AND d.tipo = 'rechazo' ORDER BY fecha_utc DESC LIMIT 1) AS ultimo_rechazo
                 FROM lote l LEFT JOIN lote_version v ON v.lote_id = l.id AND v.numero = l.version_vigente
-                {donde} ORDER BY l.actualizado_utc DESC""", parametros)
+                {donde} ORDER BY l.actualizado_utc DESC""", [P.CONCILIADO, *parametros])
         lotes = []
         for f in filas:
             lote = dict(f)
@@ -1022,4 +1074,5 @@ def catalogo() -> dict:
         "controles": CONTROLES, "exportaciones": {k: v[0] for k, v in EXPORTACIONES.items()},
         "adjuntos_permitidos": sorted(ADJUNTOS_PERMITIDOS), "evidencia_permitida": sorted(EVIDENCIA_PERMITIDA),
         "evidencia_max_mb": EVIDENCIA_MAX_MB, "motivo_minimo": MOTIVO_MINIMO,
+        "eliminar_cerrados": settings.PERMITIR_ELIMINAR_CERRADOS,
     }

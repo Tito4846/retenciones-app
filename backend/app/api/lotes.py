@@ -219,6 +219,11 @@ def anular(usuario: UsuarioActual, lote_id: str, datos: Anulacion) -> dict:
     return lotes.anular(usuario, lote_id, datos.motivo)
 
 
+@router.delete("/lotes/{lote_id}", status_code=204)
+def eliminar(usuario: UsuarioActual, lote_id: str) -> None:
+    lotes.eliminar(usuario, lote_id)
+
+
 # --- Exportación fiscal ----------------------------------------------------
 
 

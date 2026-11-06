@@ -1,4 +1,4 @@
-import { Component, computed, inject, input, linkedSignal, model } from '@angular/core';
+import { Component, computed, inject, input, linkedSignal, model, output } from '@angular/core';
 import { DetalleLote } from '../../core/models/lote.models';
 import { LotesStore } from '../../core/services/lotes.store';
 import { Permisos } from './revision.util';
@@ -20,6 +20,14 @@ const SIN_AUTOAPROBACION = 'No podés aprobar un lote que vos mismo preparaste';
             Queda cerrada: no se va a poder editar ni borrar nada, y se habilita la exportación para la DDJJ.
             @if (evidencia().length; as n) { Se {{ n === 1 ? 'adjunta 1 comprobante' : 'adjuntan ' + n + ' comprobantes' }} al cierre. }
           </p>
+          @if (aMirar().length) {
+            <p class="mt-1 text-sm font-semibold text-amber-800">Se aprueba con esto sin resolver: {{ aMirar().join(' · ') }}. Queda registrado.</p>
+          }
+        } @else if (tipo === 'eliminar') {
+          <p class="text-sm text-red-900">
+            Vas a borrar <strong>{{ lote.empresa }}</strong> del todo: versiones, partidas, comprobantes y exportaciones. No se puede deshacer.
+            En la auditoría queda solo que lo eliminaste.
+          </p>
         } @else {
           <label class="block text-sm">
             <span class="font-semibold">{{ tipo === 'rechazar' ? 'Qué tiene que corregir ' + lote.maker_nombre : 'Por qué se anula' }}</span>
@@ -31,10 +39,10 @@ const SIN_AUTOAPROBACION = 'No podés aprobar un lote que vos mismo preparaste';
         }
         <div class="mt-2 flex justify-end gap-2">
           <button type="button" (click)="confirmar.set(null)" class="rounded-lg px-3 py-2 text-sm font-semibold text-muted hover:bg-white">Cancelar</button>
-          <button type="button" (click)="confirmarAccion()" [disabled]="store.ocupado() || (tipo !== 'aprobar' && motivo().trim().length < minimo())"
+          <button type="button" (click)="confirmarAccion()" [disabled]="store.ocupado() || ((tipo === 'rechazar' || tipo === 'anular') && motivo().trim().length < minimo())"
             class="rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
             [class]="tipo === 'aprobar' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'">
-            {{ tipo === 'aprobar' ? 'Sí, aprobar y cerrar' : tipo === 'rechazar' ? 'Devolver' : 'Anular lote' }}
+            {{ tipo === 'aprobar' ? 'Sí, aprobar y cerrar' : tipo === 'rechazar' ? 'Devolver' : tipo === 'eliminar' ? 'Sí, eliminar' : 'Anular lote' }}
           </button>
         </div>
       </div>
@@ -45,6 +53,9 @@ const SIN_AUTOAPROBACION = 'No podés aprobar un lote que vos mismo preparaste';
         <span class="mr-auto text-sm font-semibold">Exportación para la DDJJ</span>
         @for (x of exportaciones(); track x[0]) {
           <button type="button" (click)="store.exportar(lote.id, x[0])" class="rounded-lg bg-brand-700 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-800">{{ x[1] }}</button>
+        }
+        @if (p.eliminar) {
+          <button type="button" (click)="confirmar.set('eliminar')" class="px-2 text-sm font-semibold text-red-700 hover:underline">Eliminar lote</button>
         }
       </div>
       @if (detalle().exportaciones.length) {
@@ -67,7 +78,10 @@ const SIN_AUTOAPROBACION = 'No podés aprobar un lote que vos mismo preparaste';
           class="mb-2 w-full rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-brand-400" />
       }
       <div class="flex flex-wrap items-center justify-end gap-2">
-        <p class="mr-auto min-w-[12rem] flex-1 text-sm" [class]="trabas().length ? 'text-amber-800' : 'text-muted'">{{ leyenda() }}</p>
+        <p class="mr-auto min-w-[12rem] flex-1 text-sm" [class]="trabas().length || aMirar().length ? 'text-amber-800' : 'text-muted'">{{ leyenda() }}</p>
+        @if (p.eliminar) {
+          <button type="button" (click)="confirmar.set('eliminar')" class="px-2 text-sm font-semibold text-red-700 hover:underline">Eliminar lote</button>
+        }
         @if (p.anular) {
           <button type="button" (click)="confirmar.set('anular')" class="px-2 text-sm font-semibold text-muted hover:text-red-700">Anular</button>
         }
@@ -109,11 +123,14 @@ export class AccionesLote {
   readonly permisos = input.required<Permisos>();
   readonly trabasEnviar = input.required<string[]>();
   readonly trabasAprobar = input.required<string[]>();
+  /** Lo que quedó sin resolver: se informa, no frena. */
+  readonly pendiente = input<string[]>([]);
   /** Se manda con la confirmación y se vacía solo si salió bien. */
   readonly evidencia = model<File[]>([]);
+  readonly eliminado = output<void>();
 
   private readonly loteId = computed(() => this.detalle().lote.id);
-  protected readonly confirmar = linkedSignal<string, 'rechazar' | 'anular' | 'aprobar' | null>({ source: this.loteId, computation: () => null });
+  protected readonly confirmar = linkedSignal<string, 'rechazar' | 'anular' | 'aprobar' | 'eliminar' | null>({ source: this.loteId, computation: () => null });
   protected readonly motivo = linkedSignal({ source: this.loteId, computation: () => '' });
   protected readonly nota = linkedSignal({ source: this.loteId, computation: () => '' });
   protected readonly minimo = computed(() => this.store.catalogo()?.motivo_minimo ?? 15);
@@ -124,13 +141,17 @@ export class AccionesLote {
     return p.revisar ? this.trabasAprobar() : p.editar ? this.trabasEnviar() : [];
   });
 
+  /** Se muestra a quien puede enviar o aprobar: a los demás no les cambia nada. */
+  protected readonly aMirar = computed(() => (this.permisos().revisar || this.permisos().editar ? this.pendiente() : []));
+
   /** A la izquierda de los botones: qué falta, o en qué está el lote si no te toca a vos. */
   protected readonly leyenda = computed(() => {
     const lote = this.detalle().lote;
     const p = this.permisos();
     if (this.trabas().length) return `Para seguir: ${this.trabas().join(' · ')}`;
-    if (p.revisar) return 'Todo controlado: lo podés aprobar.';
-    if (p.editar) return 'Todo completo: ya lo podés enviar.';
+    const mirar = this.aMirar().join(' · ');
+    if (p.revisar) return mirar ? `Para evaluar: ${mirar}. Decidís vos si lo aprobás.` : 'Todo controlado: lo podés aprobar.';
+    if (p.editar) return mirar ? `Queda: ${mirar}. Lo podés enviar igual.` : 'Todo completo: ya lo podés enviar.';
     if (p.tomar) return `Lo preparó ${lote.maker_nombre}. Al tomarlo queda a tu nombre.`;
     if (p.reasignar) return `Lo está revisando ${lote.checker_nombre}.`;
     switch (lote.estado) {
@@ -157,6 +178,7 @@ export class AccionesLote {
     const fin = (ok: boolean) => ok && (this.confirmar.set(null), this.motivo.set(''));
     if (tipo === 'rechazar') this.store.rechazar(id, version_vigente, this.motivo()).subscribe(fin);
     if (tipo === 'anular') this.store.anular(id, this.motivo()).subscribe(fin);
+    if (tipo === 'eliminar') this.store.eliminar(id).subscribe((ok) => ok && this.eliminado.emit());
     if (tipo === 'aprobar') {
       this.store.aprobar(id, version_vigente, this.evidencia()).subscribe((ok) => {
         if (ok) this.evidencia.set([]);

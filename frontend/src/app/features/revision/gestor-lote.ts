@@ -1,51 +1,52 @@
-import { DatePipe } from '@angular/common';
 import { Component, ElementRef, computed, inject, input, model, viewChild } from '@angular/core';
 import { DetalleLote } from '../../core/models/lote.models';
 import { LotesStore } from '../../core/services/lotes.store';
+import { EntregaLote } from './entrega-lote';
 import { EvidenciaLote } from './evidencia-lote';
 import { ExcepcionesLote } from './excepciones-lote';
-import { CONCILIADO, ORIGEN_VERSION } from './revision.util';
+import { CONCILIADO } from './revision.util';
 
 /** El trabajo del lote: se baja el Excel, se completa afuera, se sube y se adjuntan los comprobantes. */
 @Component({
   selector: 'app-gestor-lote',
-  imports: [DatePipe, EvidenciaLote, ExcepcionesLote],
+  imports: [EntregaLote, EvidenciaLote, ExcepcionesLote],
   host: { class: 'block space-y-3' },
   template: `
     @let det = detalle();
     <section class="rounded-xl border border-line bg-white p-3">
-      <div class="grid gap-2 sm:grid-cols-2">
+      <app-entrega-lote [detalle]="det" [editar]="editar()">
+        @if (!editar()) {
+          <button type="button" (click)="descargar()" [disabled]="!vigente()"
+            class="shrink-0 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold hover:bg-canvas disabled:opacity-50">Descargar Excel</button>
+        }
+      </app-entrega-lote>
+      @if (editar()) {
+      <div class="mt-3 grid gap-2 sm:grid-cols-2">
         <button type="button" (click)="descargar()" [disabled]="!vigente()"
           class="flex items-center justify-center gap-2 rounded-lg border border-line bg-white px-4 py-2 font-semibold hover:bg-canvas disabled:opacity-50">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5" aria-hidden="true">
             <path d="M12 3v12m0 0-4-4m4 4 4-4M4 19h16" />
           </svg>
-          Descargar Excel de Trabajo
+          {{ revisar() ? 'Descargar Excel Subido' : 'Descargar Excel de Trabajo' }}
         </button>
-        @if (editar()) {
           <label class="flex cursor-pointer items-center justify-center gap-2 rounded-lg bg-brand-700 px-4 py-2 font-semibold text-white hover:bg-brand-800 focus-within:ring-2 focus-within:ring-brand-400"
             [class.opacity-50]="store.ocupado()">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5" aria-hidden="true">
               <path d="M12 16V4m0 0-4 4m4-4 4 4M4 20h16" />
             </svg>
-            Subir Excel Revisado
+            {{ revisar() ? 'Subir Excel Corregido' : 'Subir Excel Revisado' }}
             <input #selector type="file" accept=".xlsx" class="sr-only" (change)="subir($event)" [disabled]="store.ocupado()" />
           </label>
-        }
       </div>
-      <div class="mt-2 flex flex-wrap items-baseline justify-between gap-x-3 text-xs text-muted">
-        @if (vigente(); as v) {
-          <p>Versión vigente: {{ v.numero }} · {{ origen() }} · {{ v.autor_nombre }} · {{ v.creado_utc | date: 'dd/MM HH:mm' }}</p>
-        }
-        @if (editar()) {
-          <details class="open:w-full">
-            <summary class="cursor-pointer font-semibold hover:text-brand-700">Cómo completar el Excel</summary>
-            <p class="mt-1">
-              En la hoja RESUMEN está la vista general. En CONCILIACION, lo que falta va arriba: completá Justificación y Comentario. Para llevar la diferencia a cero usá Importe ajustado, o poné Sí en Excluida contando el motivo.
-            </p>
-          </details>
-        }
-      </div>
+      }
+      @if (editar()) {
+        <details class="mt-2 text-xs text-muted">
+          <summary class="cursor-pointer font-semibold hover:text-brand-700">Cómo completar el Excel</summary>
+          <p class="mt-1">
+            En la hoja RESUMEN está la vista general. En CONCILIACION, lo que falta va arriba: completá Justificación y Comentario. Para llevar la diferencia a cero usá Importe ajustado, o poné Sí en Excluida contando el motivo.
+          </p>
+        </details>
+      }
 
       @if (store.errorExcel(); as e) {
         <div role="alert" class="mt-3 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900 transition duration-300 ease-out starting:-translate-y-1 starting:opacity-0 motion-reduce:transition-none">
@@ -69,42 +70,31 @@ import { CONCILIADO, ORIGEN_VERSION } from './revision.util';
     </section>
 
     @if (editar()) {
-      <app-evidencia-lote [revisar]="revisar()" [(archivos)]="evidencia" />
+      @if (revisar()) {
+        <details class="rounded-xl border border-line bg-white px-3 py-2">
+          <summary class="cursor-pointer text-sm font-semibold">Sumar comprobantes</summary>
+          <app-evidencia-lote class="mt-2" [revisar]="true" [(archivos)]="evidencia" />
+        </details>
+      } @else {
+        <app-evidencia-lote [revisar]="false" [(archivos)]="evidencia" />
+      }
     }
 
     <!-- Lo principal del lote: va suelto y entero, sin caja ni scroll propio -->
     <section>
-      <h3 class="text-base font-semibold" [class]="porResolver().length ? 'text-amber-800' : 'text-emerald-700'">
-        @if (porResolver().length; as n) {
-          Conciliaron solas {{ conciliadas() }} de {{ det.partidas.length }} partidas. {{ n === 1 ? 'Queda 1' : 'Quedan ' + n }} para resolver en el Excel.
-        } @else if (conciliadas() === det.partidas.length) {
-          Conciliaron solas todas las partidas.
+      <h3 class="text-base font-semibold" [class]="porResolver() ? 'text-amber-800' : 'text-emerald-700'">
+        @if (porResolver(); as n) {
+          Conciliaron solas {{ conciliadas() }} de {{ det.partidas.length }} partidas. {{ n === 1 ? 'Queda 1 sin completar' : 'Quedan ' + n + ' sin completar' }}.
+        } @else if (excepciones().length) {
+          Conciliaron solas {{ conciliadas() }} de {{ det.partidas.length }} partidas. Las otras {{ excepciones().length }} están completas.
         } @else {
-          Conciliaron solas {{ conciliadas() }} de {{ det.partidas.length }} partidas. Las demás ya están resueltas.
+          Conciliaron solas todas las partidas.
         }
       </h3>
-      @if (porResolver().length) {
-        <app-excepciones-lote [partidas]="porResolver()" [editar]="editar()" />
+      @if (excepciones().length) {
+        <app-excepciones-lote [partidas]="excepciones()" [editar]="editar()" />
       }
     </section>
-
-    @if (det.adjuntos.length) {
-      <section>
-        <h3 class="text-sm font-semibold">Comprobantes guardados</h3>
-        <ul class="mt-2 divide-y divide-line rounded-lg border border-line bg-white text-sm">
-          @for (a of det.adjuntos; track a.id) {
-            <li class="flex flex-wrap items-center gap-2 px-3 py-2">
-              <button type="button" (click)="store.bajarAdjunto(det.lote.id, a.id, a.nombre)" class="min-w-0 truncate font-semibold text-brand-700 hover:underline">{{ a.nombre }}</button>
-              <span class="text-xs text-muted">{{ a.autor_nombre }} · {{ a.creado_utc | date: 'dd/MM HH:mm' }}</span>
-              @if (editar()) {
-                <button type="button" (click)="store.retirarAdjunto(det.lote.id, a.id).subscribe()" [disabled]="store.ocupado()"
-                  class="ml-auto text-xs font-semibold text-muted hover:text-red-700 disabled:opacity-50">Quitar</button>
-              }
-            </li>
-          }
-        </ul>
-      </section>
-    }
   `,
 })
 export class GestorLote {
@@ -118,14 +108,10 @@ export class GestorLote {
 
   private readonly selector = viewChild<ElementRef<HTMLInputElement>>('selector');
   protected readonly vigente = computed(() => this.detalle().versiones.find((v) => v.numero === this.detalle().lote.version_vigente) ?? null);
-  protected readonly origen = computed(() => {
-    const v = this.vigente();
-    return v?.correccion_checker ? 'Corrección del supervisor' : (ORIGEN_VERSION[v?.origen ?? ''] ?? v?.origen);
-  });
-
   protected readonly conciliadas = computed(() => this.detalle().partidas.filter((p) => p.estado === CONCILIADO).length);
-  /** El mismo criterio que traba el envío: lo que todavía tiene algo sin completar. */
-  protected readonly porResolver = computed(() => this.detalle().partidas.filter((p) => p.estado !== CONCILIADO && !p.excluida && p.faltas.length));
+  /** Todo lo que no concilió solo: el supervisor tiene que poder leer también lo ya justificado. */
+  protected readonly excepciones = computed(() => this.detalle().partidas.filter((p) => p.estado !== CONCILIADO));
+  protected readonly porResolver = computed(() => this.excepciones().filter((p) => !p.excluida && p.faltas.length).length);
 
   protected descargar(): void {
     const v = this.vigente();

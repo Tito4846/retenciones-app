@@ -23,6 +23,7 @@ const ACCIONES: Record<string, string> = {
   aprobado: 'Aprobó',
   anulado: 'Anuló',
   exportacion: 'Generó la exportación fiscal',
+  lote_eliminado: 'Eliminó el lote',
   descarga: 'Descargó',
   acceso_denegado: 'Acceso denegado',
 };
@@ -55,11 +56,14 @@ export class HistorialLote {
   private readonly store = inject(LotesStore);
   readonly loteId = input.required<string>();
   readonly version = input.required<number>();
+  /** Tomar, aprobar o devolver no cambian la versión, pero sí el historial. */
+  readonly estado = input.required<string>();
   protected readonly eventos = signal<EventoAuditoria[] | null>(null);
 
   constructor() {
     effect(() => {
       this.version();
+      this.estado();
       this.store.auditoria(this.loteId()).subscribe((eventos) => this.eventos.set(eventos));
     });
   }
@@ -78,6 +82,8 @@ export class HistorialLote {
       }
     }
     if (d['ok'] === false) partes.push('(destildado)');
+    if (typeof d['cambiadas'] === 'number' && d['cambiadas']) partes.push(`${d['cambiadas']} partida(s) modificada(s)`);
+    if (Array.isArray(d['pendientes']) && d['pendientes'].length) partes.push('Aprobado con puntos sin resolver');
     if (d['despues']) partes.push(JSON.stringify(d['despues']));
     if (Array.isArray(d['errores'])) partes.push(`${d['errores'].length} error(es)`);
     return partes.join(' · ');

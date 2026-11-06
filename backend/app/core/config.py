@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     # una y se guarda en DIRECTORIO_DATOS/.secreto. Si la cambiás se cierran
     # todas las sesiones y hay que volver a registrar el segundo factor.
     SECRET_KEY: str = ""
+    # Para probar: un supervisor puede borrar del todo los lotes cerrados. Lo aprobado
+    # es el respaldo de la DDJJ: esto va en False antes de trabajar con datos reales.
+    PERMITIR_ELIMINAR_CERRADOS: bool = True
     # Dónde abre la persona el front (para el enlace de configuración inicial).
     FRONT_URL: str = "http://localhost:4200"
     # Vida del token de acceso. Se renueva solo mientras se usa la app.

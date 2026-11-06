@@ -28,12 +28,39 @@ export interface Permisos {
   autor: boolean;
   anular: boolean;
   exportar: boolean;
+  /** Borrar del todo un lote cerrado: lo habilita el servidor, para probar. */
+  eliminar: boolean;
 }
 
 const PESOS = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', minimumFractionDigits: 2 });
 
 export function pesos(valor: string | number | null | undefined): string {
   return valor === null || valor === undefined || valor === '' ? '—' : PESOS.format(Number(valor));
+}
+
+/** Cuánto pasó desde una fecha, para leer de un vistazo: «hace 5 min», «ayer», «hace 3 días». */
+export function hace(iso: string | null | undefined, ahora = Date.now()): string {
+  if (!iso) return '';
+  const minutos = Math.max(0, Math.floor((ahora - new Date(iso).getTime()) / 60_000));
+  if (minutos < 1) return 'recién';
+  if (minutos < 60) return `hace ${minutos} min`;
+  if (minutos < 24 * 60) return `hace ${Math.floor(minutos / 60)} h`;
+  const dias = Math.floor(minutos / (24 * 60));
+  return dias === 1 ? 'ayer' : `hace ${dias} días`;
+}
+
+/** Quién hizo la versión, en una frase: lo primero que mira el supervisor. */
+export function quienArmo(autor: string, origen: string, correccion: number | boolean): string {
+  if (correccion) return `${autor} corrigió el Excel`;
+  if (origen === 'subido') return `${autor} subió el Excel`;
+  if (origen === 'edicion') return `${autor} corrigió en pantalla`;
+  if (origen === 'migrado') return `${autor} lo trajo de la bandeja anterior`;
+  return `${autor} lo generó de la conciliación`;
+}
+
+/** «Ana Prueba» → «AP». */
+export function iniciales(nombre: string | null | undefined): string {
+  return (nombre ?? '').split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0].toUpperCase()).join('') || '?';
 }
 
 /** El peso de un archivo para mostrar: «820 KB», «1,4 MB». */

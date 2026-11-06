@@ -13,9 +13,10 @@
           <span class="rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1" [class]="estados[det.lote.estado].clase">{{ estados[det.lote.estado].titulo }}</span>
           @if (det.lote.rectifica_a) { <span class="rounded-full bg-violet-50 px-2.5 py-0.5 text-xs font-semibold text-violet-700">Rectificativo</span> }
           <p class="ml-auto text-xs text-muted">
-            @if (det.lote.cuit_empresa) { CUIT {{ det.lote.cuit_empresa }} · }{{ periodo(det.lote.periodo) }} · v{{ det.lote.version_vigente }} · Preparó {{ det.lote.maker_nombre }}
+            @if (det.lote.cuit_empresa) { CUIT {{ det.lote.cuit_empresa }} · }{{ periodo(det.lote.periodo) }} · v{{ det.lote.version_vigente }}
           </p>
         </div>
+        <app-seguimiento-lote [detalle]="det" />
         <app-marcador-cruce [sistema]="totales().sistema" [declarado]="totales().declarado" />
       </header>
 
@@ -45,9 +46,6 @@
             <p class="mt-1 whitespace-pre-line">{{ r.motivo }}</p>
           </div>
         }
-        @if ((p.revisar || p.tomar) && ultimoEnvio()?.motivo; as nota) {
-          <p class="rounded-lg bg-white px-3 py-2 text-sm"><span class="font-semibold">Nota de {{ det.lote.maker_nombre }}:</span> {{ nota }}</p>
-        }
 
         @if (det.partidas.length) {
           <app-gestor-lote [detalle]="det" [editar]="p.editar" [revisar]="p.revisar" [(evidencia)]="evidencia" />
@@ -65,12 +63,12 @@
           <summary class="cursor-pointer px-4 py-2 text-sm font-semibold">Versiones e historial</summary>
           <div class="space-y-5 border-t border-line p-3">
             <app-versiones-lote [detalle]="det" />
-            <app-historial-lote [loteId]="det.lote.id" [version]="det.lote.version_vigente" />
+            <app-historial-lote [loteId]="det.lote.id" [version]="det.lote.version_vigente" [estado]="det.lote.estado" />
           </div>
         </details>
       </div>
 
-      <app-acciones-lote [detalle]="det" [permisos]="p" [trabasEnviar]="trabasEnviar()" [trabasAprobar]="trabasAprobar()" [(evidencia)]="evidencia" />
+      <app-acciones-lote [detalle]="det" [permisos]="p" [trabasEnviar]="trabasEnviar()" [trabasAprobar]="trabasAprobar()" [pendiente]="pendiente()" [(evidencia)]="evidencia" (eliminado)="alEliminar()" />
     </section>
   } @else {
     <section class="flex items-center justify-center rounded-2xl border border-dashed border-line p-10 text-center text-muted">

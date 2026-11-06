@@ -1,7 +1,6 @@
 import { DatePipe } from '@angular/common';
 import { Component, computed, inject, linkedSignal, signal } from '@angular/core';
-import { ActivatedRoute, RouterLink } from '@angular/router';
-import { ErrorValidacion } from '../../core/models/lote.models';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { LotesStore } from '../../core/services/lotes.store';
 import { SesionService } from '../../core/services/sesion.service';
 import { AccionesLote } from './acciones-lote';
@@ -9,11 +8,9 @@ import { BandejaLotes } from './bandeja-lotes';
 import { GestorLote } from './gestor-lote';
 import { HistorialLote } from './historial-lote';
 import { MarcadorCruce } from './marcador-cruce';
+import { SeguimientoLote } from './seguimiento-lote';
 import { centavos, CONCILIADO, ESTADOS, periodo, Permisos, pesos } from './revision.util';
 import { VersionesLote } from './versiones-lote';
-
-/** Las trabas que la pantalla resume sola: del resto se ocupa lo que diga el backend. */
-const TRABAS_LOCALES = new Set(['DIFERENCIA_NETA', 'SIN_JUSTIFICACION', 'SIN_COMENTARIO']);
 
 /**
  * Verificación y aprobación: bandeja a la izquierda, lote a la derecha. El trabajo
@@ -21,12 +18,13 @@ const TRABAS_LOCALES = new Set(['DIFERENCIA_NETA', 'SIN_JUSTIFICACION', 'SIN_COM
  */
 @Component({
   selector: 'app-revision',
-  imports: [AccionesLote, BandejaLotes, DatePipe, GestorLote, HistorialLote, MarcadorCruce, RouterLink, VersionesLote],
+  imports: [AccionesLote, BandejaLotes, DatePipe, GestorLote, HistorialLote, MarcadorCruce, RouterLink, SeguimientoLote, VersionesLote],
   templateUrl: './revision.html',
 })
 export class RevisionPantalla {
   protected readonly store = inject(LotesStore);
   protected readonly sesion = inject(SesionService);
+  private readonly router = inject(Router);
   protected readonly estados = ESTADOS;
   protected readonly periodo = periodo;
 
@@ -54,6 +52,7 @@ export class RevisionPantalla {
       autor: abierto && supervisor && autor,
       anular: !!lote && ['borrador', 'pendiente', 'rechazado'].includes(lote.estado) && this.sesion.puedePreparar(),
       exportar: lote?.estado === 'aprobado',
+      eliminar: !abierto && !!lote && supervisor && !!this.store.catalogo()?.eliminar_cerrados,
     };
   });
 
@@ -65,18 +64,23 @@ export class RevisionPantalla {
   private readonly pendientes = computed(() => (this.d()?.partidas ?? []).filter((p) => !p.excluida && p.estado !== CONCILIADO && p.faltas.length).length);
 
   protected readonly ultimoRechazo = computed(() => [...(this.d()?.decisiones ?? [])].reverse().find((x) => x.tipo === 'rechazo') ?? null);
-  protected readonly ultimoEnvio = computed(() => [...(this.d()?.decisiones ?? [])].reverse().find((x) => x.tipo === 'envio') ?? null);
 
-  protected readonly trabasEnviar = computed(() => this.trabas(this.d()?.compuertas.enviar ?? []));
-  protected readonly trabasAprobar = computed(() => this.trabas(this.d()?.compuertas.aprobar ?? []));
+  protected readonly trabasEnviar = computed(() => (this.d()?.compuertas.enviar ?? []).map((e) => e.mensaje));
+  protected readonly trabasAprobar = computed(() => (this.d()?.compuertas.aprobar ?? []).map((e) => e.mensaje));
 
-  /** Lo que bloquea el botón principal, en una línea. Los comprobantes elegidos ya cuentan: viajan con la confirmación. */
-  private trabas(compuertas: ErrorValidacion[]): string[] {
-    const trabas: string[] = [];
-    if (this.totales().neta) trabas.push(`la diferencia neta es ${pesos(this.totales().neta / 100)}`);
-    const n = this.pendientes();
-    if (n) trabas.push(`faltan completar ${n} ${n === 1 ? 'excepción' : 'excepciones'} en el Excel`);
-    const resto = compuertas.filter((e) => !TRABAS_LOCALES.has(e.codigo) && !(e.codigo === 'SIN_RESPALDO' && this.evidencia().length));
-    return [...trabas, ...resto.map((e) => e.mensaje)];
+  /** Sin el lote borrado en la dirección: al recargar intentaría abrirlo. */
+  protected alEliminar(): void {
+    this.seleccionId.set(null);
+    this.router.navigate([], { queryParams: {} });
   }
+
+  /** Lo que quedó sin resolver, en una línea: no frena, lo evalúa quien aprueba. Los comprobantes elegidos ya cuentan. */
+  protected readonly pendiente = computed(() => {
+    const lista: string[] = [];
+    if (this.totales().neta) lista.push(`diferencia neta de ${pesos(this.totales().neta / 100)}`);
+    const n = this.pendientes();
+    if (n) lista.push(`${n} ${n === 1 ? 'excepción' : 'excepciones'} sin completar`);
+    if (this.d()?.pendientes.some((e) => e.codigo === 'SIN_RESPALDO') && !this.evidencia().length) lista.push('sin comprobantes');
+    return lista;
+  });
 }

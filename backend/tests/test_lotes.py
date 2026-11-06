@@ -71,8 +71,9 @@ def test_partidas_con_estado_y_excel_con_hojas_del_lote(ruta_arca, ruta_mayor):
     # El cuadre al centavo contra las fuentes da.
     assert lote["versiones"][0]["validacion"]["valida"]
     assert not [e for e in lote["compuertas"]["enviar"] if e["codigo"].startswith("CUADRE")]
-    # Sin justificar no se puede enviar.
-    assert {e["codigo"] for e in lote["compuertas"]["enviar"]} == {"SIN_JUSTIFICACION", "SIN_COMENTARIO", "SIN_RESPALDO", "DIFERENCIA_NETA"}
+    # Sin justificar no frena nada: queda para quien aprueba.
+    assert lote["compuertas"]["enviar"] == []
+    assert {e["codigo"] for e in lote["pendientes"]} == {"SIN_JUSTIFICACION", "SIN_COMENTARIO", "SIN_RESPALDO", "DIFERENCIA_NETA"}
 
     excel = cliente.get(f"/api/lotes/{lote['lote']['id']}/versiones/1/excel", headers=ANA)
     libro = openpyxl.load_workbook(io.BytesIO(excel.content))
@@ -95,7 +96,6 @@ def test_ciclo_completo_maker_checker(ruta_arca, ruta_mayor):
 
     # Un empleado no revisa.
     assert cliente.post(base + "/tomar", headers=ANA).status_code == 403
-    assert cliente.post(base + "/enviar", data={"version": 1}, headers=ANA).json()["detail"]["codigo"] == "COMPUERTA"
 
     lote = _justificar_todo(lote)
     assert lote["lote"]["version_vigente"] == 1  # borrador: se corrige en el lugar
@@ -169,13 +169,13 @@ def test_segregacion_de_funciones(ruta_arca, ruta_mayor):
     assert "acceso_denegado" in acciones
 
 
-def test_respaldo_obligatorio(ruta_arca, ruta_mayor):
+def test_sin_comprobante_queda_como_pendiente(ruta_arca, ruta_mayor):
     lote = _lote(ruta_arca, ruta_mayor)
     base = f"/api/lotes/{lote['lote']['id']}"
     for p in lote["partidas"]:
         lote = cliente.patch(f"{base}/partidas/{p['clave']}", json={"version": 1, "justificacion": "error_carga", "comentario": "Ver NC"},
                              headers=ANA).json()
-    assert {e["codigo"] for e in lote["compuertas"]["enviar"]} == {"SIN_RESPALDO", "DIFERENCIA_NETA"}
+    assert {e["codigo"] for e in lote["pendientes"]} == {"SIN_RESPALDO", "DIFERENCIA_NETA"}
     assert cliente.post(f"{base}/adjuntos", files={"archivo": ("virus.exe", b"MZ")}, headers=ANA).status_code == 422
 
 
@@ -205,25 +205,94 @@ def test_subir_version_trabajada_en_excel(ruta_arca, ruta_mayor):
     assert (lote["partidas"][0]["justificacion"], lote["partidas"][0]["comentario"]) == ("temporal", "Se registra en noviembre")
 
 
-def test_subida_que_altera_columnas_bloqueadas(ruta_arca, ruta_mayor):
+def _avisos(lote: dict) -> list[str]:
+    return [a["mensaje"] for a in lote["versiones"][0]["validacion"]["advertencias"] if a["etapa"] != 4]
+
+
+def test_lo_que_se_toca_fuera_de_las_columnas_libres_se_ignora_y_se_avisa(ruta_arca, ruta_mayor):
+    lote = _lote(ruta_arca, ruta_mayor)
+    lote_id = lote["lote"]["id"]
+    importe = lote["partidas"][0]["importe_fisco"]
+    libro = _bajar(lote_id, 1)
+    hoja = libro["CONCILIACION"]
+    hoja["M2"] = 1.0  # Importe Fisco
+    hoja["F2"] = "20-99999999-9"
+    hoja["Q2"] = "Se registra en noviembre"
+    r = _subir_version(lote_id, libro, 1)
+    assert r.status_code == 201, r.text
+    lote = r.json()
+    assert lote["lote"]["version_vigente"] == 2
+    assert lote["partidas"][0]["importe_fisco"] == importe and lote["partidas"][0]["comentario"] == "Se registra en noviembre"
+    assert _avisos(lote) == ["Fila 2: se mantuvo el dato original de «CUIT», «Importe Fisco»."]
+    # Con la pantalla desactualizada, o el mismo archivo, no.
+    assert _subir_version(lote_id, _bajar(lote_id, 2), 7).json()["detail"]["codigo"] == "VERSION_VIEJA"
+    original = cliente.get(f"/api/lotes/{lote_id}/versiones/2/excel", headers=ANA).content
+    r = cliente.post(f"/api/lotes/{lote_id}/versiones", data={"version_base": "2"},
+                     files={"archivo": ("x.xlsx", original)}, headers=ANA)
+    assert r.json()["detail"]["errores"][0]["codigo"] == "SIN_CAMBIOS"
+
+
+def test_un_excel_ordenado_y_sin_hojas_tecnicas_se_carga_igual(ruta_arca, ruta_mayor):
     lote = _lote(ruta_arca, ruta_mayor)
     lote_id = lote["lote"]["id"]
     libro = _bajar(lote_id, 1)
     hoja = libro["CONCILIACION"]
-    hoja["M2"] = 1.0  # Importe Fisco
-    hoja["Q3"] = "=1+1"
+    clave = hoja["A3"].value
+    # Otro orden de filas: la primera partida pasa abajo, con su comentario.
+    hoja["Q3"] = "Va con la nota de crédito"
+    hoja.move_range("A2:S2", rows=hoja.max_row + 2)
+    del libro["_META"], libro["RESUMEN"], libro["ARCA"]
+    hoja.delete_cols(4, 2)  # Flags y Criterio
     r = _subir_version(lote_id, libro, 1)
-    assert r.status_code == 422
-    errores = r.json()["detail"]["errores"]
-    assert {(e["codigo"], e["fila"]) for e in errores} == {("COLUMNA_ALTERADA", 2), ("FORMULA", 3)}
-    # Sobre una versión vieja o del mismo archivo, tampoco.
-    assert _subir_version(lote_id, _bajar(lote_id, 1), 7).json()["detail"]["codigo"] == "VERSION_VIEJA"
-    original = cliente.get(f"/api/lotes/{lote_id}/versiones/1/excel", headers=ANA).content
-    r = cliente.post(f"/api/lotes/{lote_id}/versiones", data={"version_base": "1"},
-                     files={"archivo": ("x.xlsx", original)}, headers=ANA)
-    assert r.json()["detail"]["errores"][0]["codigo"] == "SIN_CAMBIOS"
-    acciones = [e["action_type"] for e in cliente.get(f"/api/lotes/{lote_id}/auditoria", headers=ANA).json()["eventos"]]
-    assert acciones.count("carga_rechazada") == 2
+    assert r.status_code == 201, r.text
+    lote = r.json()
+    assert next(p for p in lote["partidas"] if p["clave"] == clave)["comentario"] == "Va con la nota de crédito"
+    # Las hojas de origen salen de la versión anterior, no de lo que trajo el archivo.
+    assert "ARCA" in _bajar(lote_id, 2).sheetnames
+
+
+def test_las_filas_que_faltan_quedan_como_estaban_y_las_de_mas_se_ignoran(ruta_arca, ruta_mayor):
+    lote = _lote(ruta_arca, ruta_mayor)
+    lote_id = lote["lote"]["id"]
+    libro = _bajar(lote_id, 1)
+    hoja = libro["CONCILIACION"]
+    hoja["Q2"] = "Trabajada"
+    hoja.delete_rows(3)
+    hoja.append(["no-existe"])
+    r = _subir_version(lote_id, libro, 1)
+    assert r.status_code == 201, r.text
+    avisos = _avisos(r.json())
+    assert len(r.json()["partidas"]) == len(lote["partidas"])
+    assert "1 partida no venía en el Excel: quedó como estaba." in avisos
+    assert any("no es una partida del lote" in a for a in avisos)
+
+
+def test_un_excel_de_otro_lote_no_se_carga(ruta_arca, ruta_mayor):
+    lote_id = _lote(ruta_arca, ruta_mayor)["lote"]["id"]
+    libro = _bajar(lote_id, 1)
+    hoja = libro["_META"]
+    for fila in hoja.iter_rows():
+        if fila[0].value == "lote_id":
+            fila[1].value = "otro-lote"
+    assert _subir_version(lote_id, libro, 1).json()["detail"]["errores"][0]["codigo"] == "OTRO_LOTE"
+    libro = _bajar(lote_id, 1)
+    del libro["_META"]
+    hoja = libro["CONCILIACION"]
+    for fila in range(2, hoja.max_row + 1):
+        hoja[f"A{fila}"] = None
+    assert _subir_version(lote_id, libro, 1).json()["detail"]["errores"][0]["codigo"] == "OTRO_LOTE"
+    libro = _bajar(lote_id, 1)
+    libro["CONCILIACION"].delete_cols(1)
+    assert _subir_version(lote_id, libro, 1).json()["detail"]["errores"][0]["codigo"] == "SIN_CLAVE"
+
+
+def test_la_justificacion_puede_ser_texto_libre(ruta_arca, ruta_mayor):
+    lote = _lote(ruta_arca, ruta_mayor)
+    libro = _bajar(lote["lote"]["id"], 1)
+    libro["CONCILIACION"]["P2"] = "Lo habló el cliente con ARCA"
+    r = _subir_version(lote["lote"]["id"], libro, 1)
+    assert r.status_code == 201, r.text
+    assert r.json()["partidas"][0]["justificacion"] == "Lo habló el cliente con ARCA"
 
 
 def test_lote_repetido_y_anulacion(ruta_arca, ruta_mayor):
@@ -293,7 +362,7 @@ def _en_revision(ruta_arca, ruta_mayor) -> tuple[dict, str]:
     return r.json(), base
 
 
-def test_la_diferencia_neta_bloquea_y_se_actualiza_con_el_ajuste(ruta_arca, ruta_mayor):
+def test_la_diferencia_neta_se_informa_y_se_actualiza_con_el_ajuste(ruta_arca, ruta_mayor):
     lote = _lote(ruta_arca, ruta_mayor)
     base = f"/api/lotes/{lote['lote']['id']}"
     assert lote["totales"]["neta"] != "0.00"
@@ -304,11 +373,10 @@ def test_la_diferencia_neta_bloquea_y_se_actualiza_con_el_ajuste(ruta_arca, ruta
     p = next(x for x in lote["partidas"] if x["estado"] == "No Localizado en ERP")
     assert p["importe_erp"] is None and p["importe_ajustado"] == p["importe_fisco"]
 
-    # Sin el ajuste vuelve a haber diferencia y no se puede enviar. null lo borra.
+    # Sin el ajuste vuelve a haber diferencia, y queda a la vista. null lo borra.
     lote = cliente.patch(f"{base}/partidas/{p['clave']}", json={"version": 1, "importe_ajustado": None}, headers=ANA).json()
     assert lote["totales"]["neta"] == p["importe_fisco"]
-    assert [e["codigo"] for e in lote["compuertas"]["enviar"]] == ["DIFERENCIA_NETA"]
-    assert cliente.post(base + "/enviar", data={"version": 1}, headers=ANA).json()["detail"]["codigo"] == "COMPUERTA"
+    assert [e["codigo"] for e in lote["pendientes"]] == ["DIFERENCIA_NETA"]
 
     for malo in ("abc", "-5", "NaN", "Infinity"):
         r = cliente.patch(f"{base}/partidas/{p['clave']}", json={"version": 1, "importe_ajustado": malo}, headers=ANA)
@@ -375,14 +443,13 @@ def test_el_supervisor_corrige_sin_devolver_y_aprueba(ruta_arca, ruta_mayor):
     assert lote["lote"]["estado"] == "aprobado" and lote["versiones"][0]["sellada_utc"]
 
 
-def test_lo_que_corrige_el_supervisor_tambien_pasa_por_las_compuertas(ruta_arca, ruta_mayor):
+def test_lo_que_corrige_el_supervisor_queda_a_la_vista(ruta_arca, ruta_mayor):
     lote, base = _en_revision(ruta_arca, ruta_mayor)
     p = lote["partidas"][0]
     lote = cliente.patch(f"{base}/partidas/{p['clave']}", json={"version": 1, "importe_ajustado": "1.00"}, headers=LUIS).json()
     for control in cliente.get("/api/lotes/catalogo").json()["controles"]:
         cliente.put(f"{base}/controles/{control}", json={"version": 2, "ok": True}, headers=LUIS)
-    r = cliente.post(base + "/aprobar", data={"version": 2}, headers=LUIS)
-    assert r.status_code == 409 and [e["codigo"] for e in r.json()["detail"]["errores"]] == ["DIFERENCIA_NETA"]
+    assert [e["codigo"] for e in cliente.get(base, headers=LUIS).json()["pendientes"]] == ["DIFERENCIA_NETA"]
 
     # Al devolverlo, la versión queda sellada y lo que sigue es de quien prepara.
     r = cliente.post(base + "/rechazar", json={"version": 2, "motivo": "Revisá el importe que dejé mal"}, headers=LUIS)
@@ -437,33 +504,14 @@ def test_quitar_una_fila_baja_el_contador_de_excepciones(ruta_arca, ruta_mayor):
 # --- Errores del Excel y evidencia -----------------------------------------
 
 
-def test_letras_en_un_importe_se_informan_con_columna_y_fila(ruta_arca, ruta_mayor):
+def test_un_ajuste_con_letras_se_ignora_y_se_avisa(ruta_arca, ruta_mayor):
     lote_id = _lote(ruta_arca, ruta_mayor)["lote"]["id"]
     libro = _bajar(lote_id, 1)
-    libro["CONCILIACION"]["M2"] = "12a4"
+    libro["CONCILIACION"]["R2"] = "12a4"
     r = _subir_version(lote_id, libro, 1)
-    assert r.status_code == 422
-    detalle = r.json()["detail"]
-    assert detalle["errores"][0]["codigo"] == "IMPORTE_INVALIDO"
-    assert detalle["errores"][0]["mensaje"] == "Error de formato: la columna «Importe Fisco» en la fila 2 contiene letras («12a4»)."
-    assert "etapa" not in detalle["mensaje"]
-
-
-def test_columna_eliminada_se_nombra(ruta_arca, ruta_mayor):
-    lote_id = _lote(ruta_arca, ruta_mayor)["lote"]["id"]
-    libro = _bajar(lote_id, 1)
-    libro["CONCILIACION"].delete_cols(9)  # Certificado
-    errores = _subir_version(lote_id, libro, 1).json()["detail"]["errores"]
-    assert [e["mensaje"] for e in errores] == ["Se eliminó la columna original «Certificado»."]
-
-
-def test_cuit_modificada_dice_que_cambio(ruta_arca, ruta_mayor):
-    lote_id = _lote(ruta_arca, ruta_mayor)["lote"]["id"]
-    libro = _bajar(lote_id, 1)
-    libro["CONCILIACION"]["F2"] = "20-99999999-9"
-    error = _subir_version(lote_id, libro, 1).json()["detail"]["errores"][0]
-    assert error["codigo"] == "COLUMNA_ALTERADA" and error["columna"] == "CUIT"
-    assert "en la fila 2" in error["mensaje"] and "20-99999999-9" in error["mensaje"]
+    assert r.status_code == 201, r.text
+    assert _avisos(r.json()) == ["Fila 2: se ignoró el Importe ajustado «12a4», no es un número."]
+    assert r.json()["partidas"][0]["importe_ajustado"] is None
 
 
 def _listo_para_aprobar(ruta_arca, ruta_mayor) -> str:
@@ -498,10 +546,11 @@ def test_la_evidencia_queda_dentro_del_sello_de_aprobacion(ruta_arca, ruta_mayor
     assert subido["user_nombre"] == "Luis" and subido["detalle"]["sha256"] == lote["adjuntos"][-1]["sha256"]
 
 
-def test_si_no_se_aprueba_no_queda_ninguna_evidencia(ruta_arca, ruta_mayor):
+def test_si_no_se_aprueba_no_queda_ninguna_evidencia(ruta_arca, ruta_mayor, monkeypatch):
     lote, base = _en_revision(ruta_arca, ruta_mayor)
     previos = len(lote["adjuntos"])
     clave = next(p["clave"] for p in lote["partidas"] if p["estado"] != "Conciliado Automático")
+    monkeypatch.setattr(lotes, "compuertas", lambda c, lote: [{"codigo": "SIN_PARTIDAS", "mensaje": "No se puede."}])
     assert cliente.patch(f"{base}/partidas/{clave}", json={"version": 1, "importe_ajustado": "1.00"}, headers=LUIS).status_code == 200
     r = cliente.post(base + "/aprobar", data={"version": 2}, files=[_pdf()], headers=LUIS)
     assert r.status_code == 409 and r.json()["detail"]["codigo"] == "COMPUERTA"
@@ -544,10 +593,8 @@ def test_el_excel_alcanza_para_dejar_el_lote_listo(ruta_arca, ruta_mayor):
     assert r.status_code == 201, r.text
     lote = r.json()
     assert lote["totales"]["neta"] == "0.00"
-    assert [e["codigo"] for e in lote["compuertas"]["enviar"]] == ["SIN_RESPALDO"]
+    assert [e["codigo"] for e in lote["pendientes"]] == ["SIN_RESPALDO"]
     assert all(p["editado_por"] == "Ana" for p in lote["partidas"] if p["estado"] != "Conciliado Automático")
-    # El comprobante que llega con el envío cuenta para la compuerta.
-    assert cliente.post(base + "/enviar", data={"version": 2}, headers=ANA).json()["detail"]["codigo"] == "COMPUERTA"
     assert cliente.post(base + "/enviar", data={"version": 2}, files=[_pdf()], headers=ANA).status_code == 200
     assert cliente.post(base + "/tomar", headers=LUIS).status_code == 200
     r = cliente.post(base + "/aprobar", data={"version": 2}, headers=LUIS)
@@ -561,11 +608,19 @@ def test_excluir_una_fila_desde_el_excel(ruta_arca, ruta_mayor):
     fila = lote["partidas"].index(excepcion) + 2
     libro = _bajar(lote_id, 1)
     libro["CONCILIACION"][f"S{fila}"] = "Sí"
-    errores = _subir_version(lote_id, libro, 1).json()["detail"]["errores"]
-    assert [e["codigo"] for e in errores] == ["MOTIVO"]
     libro["CONCILIACION"][f"Q{fila}"] = "Asiento duplicado"
     lote = _subir_version(lote_id, libro, 1).json()
     assert next(p for p in lote["partidas"] if p["clave"] == excepcion["clave"])["excluida"] == 1
+
+
+def test_excluida_sin_motivo_se_carga_y_se_pide_al_enviar(ruta_arca, ruta_mayor):
+    lote = _lote(ruta_arca, ruta_mayor)
+    libro = _bajar(lote["lote"]["id"], 1)
+    libro["CONCILIACION"]["S2"] = "x"
+    r = _subir_version(lote["lote"]["id"], libro, 1)
+    assert r.status_code == 201, r.text
+    assert r.json()["partidas"][0]["excluida"] == 1
+    assert r.json()["partidas"][0]["faltas"] == ["Falta el motivo por el que se quitó"]
 
 
 def test_lo_conciliado_solo_tampoco_se_ajusta_por_excel(ruta_arca, ruta_mayor):
@@ -576,17 +631,21 @@ def test_lo_conciliado_solo_tampoco_se_ajusta_por_excel(ruta_arca, ruta_mayor):
     libro = _bajar(lote_id, 1)
     libro["CONCILIACION"]["B2"] = "Conciliado Automático"
     libro["CONCILIACION"]["R2"] = 1
-    assert _subir_version(lote_id, libro, 1).json()["detail"]["errores"][0]["codigo"] == "CONCILIADA"
+    r = _subir_version(lote_id, libro, 1)
+    assert r.status_code == 201, r.text
+    assert r.json()["partidas"][0]["importe_ajustado"] is None
+    assert any("concilió sola" in a for a in _avisos(r.json()))
 
 
-@pytest.mark.parametrize(("valor", "texto"), [("abc", "contiene letras"), ("1-2", "no tiene un importe válido"), (-5, "no puede ser negativa")])
-def test_importe_ajustado_invalido(ruta_arca, ruta_mayor, valor, texto):
+@pytest.mark.parametrize("valor", ["abc", "1-2"])
+def test_importe_ajustado_que_no_es_numero(ruta_arca, ruta_mayor, valor):
     lote = _lote(ruta_arca, ruta_mayor)
     fila = next(i for i, p in enumerate(lote["partidas"], start=2) if p["estado"] != "Conciliado Automático")
     libro = _bajar(lote["lote"]["id"], 1)
     libro["CONCILIACION"][f"R{fila}"] = valor
-    error = _subir_version(lote["lote"]["id"], libro, 1).json()["detail"]["errores"][0]
-    assert error["codigo"] == "IMPORTE_INVALIDO" and texto in error["mensaje"]
+    r = _subir_version(lote["lote"]["id"], libro, 1)
+    assert r.status_code == 201, r.text
+    assert all(p["importe_ajustado"] is None for p in r.json()["partidas"])
 
 
 def test_el_excel_subido_se_puede_bajar_y_volver_a_subir(ruta_arca, ruta_mayor):
@@ -699,3 +758,101 @@ def test_si_solo_cambian_las_marcas_el_lote_suma_version(ruta_arca, ruta_mayor):
     segundo = _desde_cruce(task_id).json()
     assert segundo["lote"]["id"] == primero["id"] and segundo["lote"]["version_vigente"] == 2
     assert all("FUERA_PER" in p["flags"] for p in segundo["partidas"])
+
+
+def test_sin_completar_nada_se_envia_se_aprueba_y_queda_constancia(ruta_arca, ruta_mayor):
+    lote = _lote(ruta_arca, ruta_mayor)
+    base = f"/api/lotes/{lote['lote']['id']}"
+    assert lote["totales"]["neta"] != "0.00" and lote["pendientes"]
+    r = cliente.post(base + "/enviar", data={"version": 1}, headers=ANA)
+    assert r.status_code == 200, r.text
+    assert cliente.post(base + "/tomar", headers=LUIS).status_code == 200
+    r = cliente.post(base + "/aprobar", data={"version": 1}, headers=LUIS)
+    assert r.status_code == 200, r.text
+    assert r.json()["lote"]["estado"] == "aprobado" and r.json()["pendientes"] == []
+    aprobado = next(e for e in cliente.get(f"{base}/auditoria", headers=LUIS).json()["eventos"] if e["action_type"] == "aprobado")
+    assert any("diferencia neta" in m for m in aprobado["detalle"]["pendientes"])
+    # Lo aprobado se exporta igual.
+    assert cliente.post(f"{base}/exportaciones", json={"tipo": "ddjj_txt"}, headers=ANA).status_code == 201
+
+
+def test_la_bandeja_dice_quien_subio_y_que_falta(ruta_arca, ruta_mayor):
+    lote = _lote(ruta_arca, ruta_mayor)
+    lote_id = lote["lote"]["id"]
+    excepciones = sum(p["estado"] != "Conciliado Automático" for p in lote["partidas"])
+    libro = _bajar(lote_id, 1)
+    libro["CONCILIACION"]["P2"] = "Diferencia temporal (se registra en otro período)"
+    libro["CONCILIACION"]["Q2"] = "Se registra en noviembre"
+    assert _subir_version(lote_id, libro, 1).status_code == 201
+    base = f"/api/lotes/{lote_id}"
+    assert cliente.post(base + "/enviar", data={"version": 2}, files=[_pdf()], headers=ANA).status_code == 200
+    fila = next(x for x in cliente.get("/api/lotes", headers=LUIS).json()["lotes"] if x["id"] == lote_id)
+    assert (fila["autor_version"], fila["origen_version"], fila["version_correccion"]) == ("Ana", "subido", 0)
+    assert fila["sin_completar"] == excepciones - 1 and fila["comprobantes"] == 1
+    assert fila["ultimo_envio"] and fila["version_utc"]
+
+
+def _triggers() -> set[str]:
+    with sqlite3.connect(db.ruta_db()) as c:
+        return {f[0] for f in c.execute("SELECT name FROM sqlite_master WHERE type = 'trigger'")}
+
+
+def _aprobado(ruta_arca, ruta_mayor) -> tuple[str, str]:
+    lote, base = _en_revision(ruta_arca, ruta_mayor)
+    r = cliente.post(base + "/aprobar", data={"version": lote["lote"]["version_vigente"]}, headers=LUIS)
+    assert r.status_code == 200, r.text
+    cliente.post(f"{base}/exportaciones", json={"tipo": "ddjj_txt"}, headers=LUIS)
+    return lote["lote"]["id"], base
+
+
+def test_eliminar_un_lote_cerrado_lo_borra_y_deja_constancia(ruta_arca, ruta_mayor):
+    lote_id, base = _aprobado(ruta_arca, ruta_mayor)
+    antes = _triggers()
+    archivos = len(list(db.directorio_archivos().iterdir()))
+    assert cliente.delete(base, headers=ANA).status_code == 403
+    assert cliente.delete(base, headers=LUIS).status_code == 204
+    assert cliente.get(base, headers=LUIS).status_code == 404
+    assert lote_id not in [x["id"] for x in cliente.get("/api/lotes", headers=LUIS).json()["lotes"]]
+    with sqlite3.connect(db.ruta_db()) as c:
+        for tabla in ("notificacion", "observacion", "control_revision", "decision", "exportacion_fiscal", "adjunto", "partida", "lote_version"):
+            assert c.execute(f"SELECT COUNT(*) FROM {tabla} WHERE lote_id = ?", (lote_id,)).fetchone()[0] == 0, tabla
+        assert c.execute("SELECT COUNT(*) FROM auditoria WHERE lote_id = ? AND action_type = 'lote_eliminado'", (lote_id,)).fetchone()[0] == 1
+    # Las protecciones siguen en pie, los archivos se fueron y la auditoría no se rompió.
+    assert _triggers() == antes
+    assert len(list(db.directorio_archivos().iterdir())) < archivos
+    assert cliente.get("/api/auditoria/verificar", headers=ADMIN).json()["ok"]
+
+
+def test_solo_se_eliminan_los_cerrados(ruta_arca, ruta_mayor):
+    lote, base = _en_revision(ruta_arca, ruta_mayor)
+    assert cliente.delete(base, headers=LUIS).status_code == 409
+    assert cliente.get(base, headers=LUIS).status_code == 200
+
+
+def test_un_lote_anulado_tambien_se_elimina(ruta_arca, ruta_mayor):
+    base = f"/api/lotes/{_lote(ruta_arca, ruta_mayor)['lote']['id']}"
+    assert cliente.post(base + "/anular", json={"motivo": "Era una prueba del sistema"}, headers=ANA).status_code == 200
+    assert cliente.delete(base, headers=LUIS).status_code == 204
+
+
+def test_si_eliminar_falla_el_lote_y_las_protecciones_quedan(ruta_arca, ruta_mayor, monkeypatch):
+    lote_id, base = _aprobado(ruta_arca, ruta_mayor)
+    antes = _triggers()
+
+    def falla(*_, **__):
+        raise RuntimeError("se cortó")
+
+    monkeypatch.setattr(lotes.auditoria, "registrar", falla)
+    with pytest.raises(RuntimeError):
+        lotes.eliminar(lotes.Usuario("luis", "Luis", frozenset({"supervisor"}), "127.0.0.1", "prueba"), lote_id)
+    monkeypatch.undo()
+    assert _triggers() == antes
+    assert cliente.get(base, headers=LUIS).json()["lote"]["estado"] == "aprobado"
+
+
+def test_eliminar_se_puede_apagar(ruta_arca, ruta_mayor, monkeypatch):
+    monkeypatch.setattr(settings, "PERMITIR_ELIMINAR_CERRADOS", False)
+    _, base = _aprobado(ruta_arca, ruta_mayor)
+    r = cliente.delete(base, headers=LUIS)
+    assert r.status_code == 403 and r.json()["detail"]["codigo"] == "ELIMINAR_DESACTIVADO"
+    assert cliente.get("/api/lotes/catalogo").json()["eliminar_cerrados"] is False
