@@ -842,10 +842,10 @@ def test_si_eliminar_falla_el_lote_y_las_protecciones_quedan(ruta_arca, ruta_may
     def falla(*_, **__):
         raise RuntimeError("se cortó")
 
-    monkeypatch.setattr(lotes.auditoria, "registrar", falla)
-    with pytest.raises(RuntimeError):
-        lotes.eliminar(lotes.Usuario("luis", "Luis", frozenset({"supervisor"}), "127.0.0.1", "prueba"), lote_id)
-    monkeypatch.undo()
+    with monkeypatch.context() as parche:
+        parche.setattr(lotes.auditoria, "registrar", falla)
+        with pytest.raises(RuntimeError):
+            lotes.eliminar(lotes.Usuario("luis", "Luis", frozenset({"supervisor"}), "127.0.0.1", "prueba"), lote_id)
     assert _triggers() == antes
     assert cliente.get(base, headers=LUIS).json()["lote"]["estado"] == "aprobado"
 
