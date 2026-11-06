@@ -1,77 +1,21 @@
 import { DatePipe } from '@angular/common';
-import { Component, computed, effect, inject, input, linkedSignal, model, signal } from '@angular/core';
-import { RouterLink } from '@angular/router';
+import { Component, computed, effect, inject, input, linkedSignal, signal } from '@angular/core';
 import { DetalleLote, Diff, Version } from '../../core/models/lote.models';
 import { LotesStore } from '../../core/services/lotes.store';
-import { EvidenciaLote } from './evidencia-lote';
-import { pesos } from './revision.util';
-
-const ORIGEN_VERSION: Record<string, string> = {
-  generado: 'Generada del cruce',
-  subido: 'Excel subido',
-  edicion: 'Corrección en pantalla',
-  migrado: 'Bandeja anterior',
-};
+import { ORIGEN_VERSION, pesos } from './revision.util';
 
 const CAMPOS: Record<string, string> = {
   estado: 'Estado', codigo: 'Motivo', importe_fisco: 'Importe ARCA', importe_erp: 'Importe Mayor', diferencia: 'Diferencia',
   justificacion: 'Justificación', comentario: 'Comentario', importe_ajustado: 'Importe ajustado', excluida: 'Quitada',
 };
 
-/** Las versiones del lote, el trabajo en Excel y qué cambió entre una versión y otra. */
+/** Las versiones del lote y qué cambió entre una versión y otra. */
 @Component({
   selector: 'app-versiones-lote',
-  imports: [DatePipe, EvidenciaLote, RouterLink],
+  imports: [DatePipe],
   host: { class: 'block' },
   template: `
     @let det = detalle();
-    @if (editar()) {
-      <div class="mb-4 rounded-lg bg-canvas/60 p-4 text-sm">
-        @if (!det.partidas.length) {
-          <p class="font-semibold">Este lote viene de la bandeja anterior y no tiene partidas.</p>
-          <p class="mt-1 text-muted">
-            Abrí su conciliación en <a routerLink="/conciliacion" class="font-semibold text-brand-700 underline">Conciliación</a>,
-            tocá «Generar Lote para Revisión»: si es del mismo cliente y período, se suma a este lote.
-          </p>
-        } @else {
-          <p class="font-semibold">¿Preferís trabajar en Excel?</p>
-          <p class="mt-1 text-muted">
-            Bajá el Excel, completá Justificación y Comentario en la hoja CONCILIACION y subilo. Se valida antes de quedar como versión nueva:
-            si alguien tocó importes, fechas u otras columnas bloqueadas, se rechaza y te dice qué fila.
-          </p>
-          @if (store.errorExcel(); as e) {
-            <div role="alert" class="mt-3 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-red-900 transition duration-300 ease-out starting:-translate-y-1 starting:opacity-0 motion-reduce:transition-none">
-              <div class="flex items-start gap-2">
-                <p class="font-semibold">{{ e.mensaje }}</p>
-                <button type="button" (click)="store.errorExcel.set(null)" class="ml-auto text-red-700/70 hover:text-red-900" aria-label="Cerrar">✕</button>
-              </div>
-              @if (e.errores.length) {
-                <ul class="mt-1.5 max-h-40 list-disc space-y-0.5 overflow-y-auto pl-5">
-                  @for (x of e.errores; track $index) { <li>{{ x.mensaje }}</li> }
-                </ul>
-              }
-              @if (vigente(); as v) {
-                <button type="button" (click)="store.bajarVersion(det.lote.id, v.numero, v.nombre_archivo)"
-                  class="mt-2 text-xs font-semibold underline hover:text-red-700">Volver a descargar archivo base</button>
-              }
-            </div>
-          }
-          <div class="mt-3 flex flex-wrap gap-2">
-            @if (vigente(); as v) {
-              <button type="button" (click)="store.bajarVersion(det.lote.id, v.numero, v.nombre_archivo)"
-                class="rounded-lg border border-line bg-white px-3 py-2 font-semibold hover:bg-canvas">Bajar Excel (versión {{ v.numero }})</button>
-            }
-            <label class="cursor-pointer rounded-lg bg-brand-700 px-3 py-2 font-semibold text-white hover:bg-brand-800">
-              Subir Excel trabajado
-              <input type="file" accept=".xlsx" class="sr-only" (change)="subir($event)" [disabled]="store.ocupado()" />
-            </label>
-          </div>
-        }
-      </div>
-    }
-    @if ((editar() || revisar()) && det.partidas.length) {
-      <app-evidencia-lote class="mb-4" [revisar]="revisar()" [(archivos)]="evidencia" />
-    }
     <ul class="space-y-2">
       @for (v of det.versiones; track v.id) {
         <li class="rounded-lg border border-line bg-white px-4 py-3 text-sm">
@@ -135,12 +79,6 @@ export class VersionesLote {
   protected readonly pesos = pesos;
 
   readonly detalle = input.required<DetalleLote>();
-  readonly editar = input(false);
-  /** El supervisor no trabaja el Excel, pero puede sumar comprobantes al aprobar. */
-  readonly revisar = input(false);
-  readonly evidencia = model<File[]>([]);
-
-  protected readonly vigente = computed(() => this.detalle().versiones.find((v) => v.numero === this.detalle().lote.version_vigente) ?? null);
   protected readonly desde = signal(1);
   protected readonly hasta = signal(1);
   private readonly loteId = computed(() => this.detalle().lote.id);
@@ -156,14 +94,6 @@ export class VersionesLote {
 
   protected origen(v: Version): string {
     return v.correccion_checker ? 'Corrección del supervisor' : (ORIGEN_VERSION[v.origen] ?? v.origen);
-  }
-
-  protected subir(evento: Event): void {
-    const entrada = evento.target as HTMLInputElement;
-    const archivo = entrada.files?.[0];
-    entrada.value = '';
-    const { id, version_vigente } = this.detalle().lote;
-    if (archivo) this.store.subirVersion(id, archivo, version_vigente).subscribe();
   }
 
   protected comparar(): void {

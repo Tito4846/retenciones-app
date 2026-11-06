@@ -38,124 +38,39 @@
         </div>
       }
 
-      <nav class="flex shrink-0 gap-1 overflow-x-auto border-b border-line bg-white px-2" aria-label="Secciones del lote">
-        @for (t of [
-          { id: 'excepciones', titulo: 'Excepciones', n: pendientes().length || null },
-          { id: 'conciliadas', titulo: 'Conciliadas', n: conciliadas().length },
-          { id: 'controles', titulo: 'Controles', n: controlesFaltantes() || null },
-          { id: 'versiones', titulo: 'Versiones y Excel', n: null },
-          { id: 'historial', titulo: 'Historial', n: null }
-        ]; track t.id) {
-          <button type="button" (click)="pestana.set($any(t.id))" [attr.aria-current]="pestana() === t.id ? 'page' : null"
-            class="border-b-2 px-3 py-2 text-sm font-semibold whitespace-nowrap"
-            [class]="pestana() === t.id ? 'border-brand-600 text-brand-700' : 'border-transparent text-muted hover:text-ink'">
-            {{ t.titulo }}
-            @if (t.n) { <span class="ml-0.5 text-xs tabular-nums">{{ t.n }}</span> }
-          </button>
+      <div class="min-h-0 flex-1 space-y-4 overflow-y-auto p-3">
+        @if (p.editar && det.lote.estado === 'rechazado' && ultimoRechazo(); as r) {
+          <div class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
+            <p class="font-semibold">{{ r.usuario_nombre }} te lo devolvió el {{ r.fecha_utc | date: 'dd/MM HH:mm' }}.</p>
+            <p class="mt-1 whitespace-pre-line">{{ r.motivo }}</p>
+          </div>
         }
-      </nav>
+        @if ((p.revisar || p.tomar) && ultimoEnvio()?.motivo; as nota) {
+          <p class="rounded-lg bg-white px-3 py-2 text-sm"><span class="font-semibold">Nota de {{ det.lote.maker_nombre }}:</span> {{ nota }}</p>
+        }
 
-      <div class="relative min-h-0 flex-1 overflow-y-auto p-3">
-        @switch (pestana()) {
-          @case ('excepciones') {
-            @if (p.editar && det.lote.estado === 'rechazado' && ultimoRechazo(); as r) {
-              <div class="mb-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
-                <p class="font-semibold">{{ r.usuario_nombre }} te lo devolvió el {{ r.fecha_utc | date: 'dd/MM HH:mm' }}.</p>
-                @if (motivoRechazo()) { <p class="mt-1 whitespace-pre-line">{{ motivoRechazo() }}</p> }
-                <ul class="mt-1 space-y-1">
-                  @for (o of observacionesAbiertas(); track o.id) {
-                    <li class="flex gap-2">
-                      <span class="flex-1">
-                        • @if (partidaDe(o.clave_partida); as pp) { <strong>{{ pp.razon_social || pp.cuit }}:</strong> }
-                        {{ o.texto }}
-                      </span>
-                      @if (o.clave_partida) {
-                        <button type="button" (click)="irAObservacion(o)" class="shrink-0 text-xs font-semibold underline">Ver</button>
-                      }
-                    </li>
-                  }
-                </ul>
-              </div>
-            }
-            @if ((p.revisar || p.tomar) && ultimoEnvio()?.motivo; as nota) {
-              <p class="mb-3 rounded-lg bg-white px-3 py-2 text-sm"><span class="font-semibold">Nota de {{ det.lote.maker_nombre }}:</span> {{ nota }}</p>
-            }
+        @if (det.partidas.length) {
+          <app-gestor-lote [detalle]="det" [editar]="p.editar" [revisar]="p.revisar" [(evidencia)]="evidencia" />
+        } @else {
+          <div class="rounded-xl border border-line bg-white p-4 text-sm">
+            <p class="font-semibold">Este lote viene de la bandeja anterior y no tiene partidas.</p>
+            <p class="mt-1 text-muted">
+              Abrí su conciliación en <a routerLink="/conciliacion" class="font-semibold text-brand-700 underline">Conciliación</a>,
+              tocá «Generar Lote para Revisión»: si es del mismo cliente y período, se suma a este lote.
+            </p>
+          </div>
+        }
 
-            @if (!det.partidas.length) {
-              <p class="py-10 text-center text-sm text-muted">Este lote viene de la bandeja anterior y no tiene partidas. Mirá «Versiones y Excel».</p>
-            } @else {
-              <div class="mb-3 flex flex-wrap items-center gap-3">
-                <input type="search" [value]="busqueda()" (input)="busqueda.set($any($event.target).value)" aria-label="Buscar excepciones"
-                  placeholder="Buscar agente, CUIT, certificado o importe…"
-                  class="min-w-[12rem] flex-1 rounded-lg border border-line bg-white px-3 py-1.5 text-sm outline-none focus:border-brand-400" />
-                @if (p.editar) {
-                  <label class="flex items-center gap-2 text-sm text-muted">
-                    <input type="checkbox" class="h-4 w-4 accent-brand-600" [checked]="soloPendientes()" (change)="soloPendientes.set(!soloPendientes())" />
-                    Solo lo que falta
-                  </label>
-                }
-              </div>
-              <div class="space-y-3">
-                @for (x of excepciones(); track x.clave) {
-                  <app-tarjeta-excepcion [partida]="x" [loteId]="det.lote.id" [version]="det.lote.version_vigente"
-                    [adjuntos]="adjuntosPorPartida()[x.clave] ?? []" [observaciones]="obsPorPartida()[x.clave] ?? []"
-                    [editable]="p.editar" [observable]="p.revisar" (vista)="anotarImporte($event)" (cambio)="actualizarExcepcion($event)" />
-                } @empty {
-                  <p class="rounded-xl border border-dashed border-line px-4 py-8 text-center text-sm text-muted">
-                    @if (busqueda().trim() || soloPendientes()) { No hay excepciones que coincidan. } @else { No hay excepciones: todo concilió solo. }
-                  </p>
-                }
-              </div>
-
-              @if (quitadas().length) {
-                <details class="mt-4 rounded-xl border border-line bg-white">
-                  <summary class="cursor-pointer px-4 py-2 text-sm font-semibold">Filas quitadas ({{ quitadas().length }})</summary>
-                  <ul class="divide-y divide-line border-t border-line text-sm">
-                    @for (x of quitadas(); track x.clave) {
-                      <li class="flex items-start gap-3 px-4 py-2">
-                        <div class="min-w-0 flex-1">
-                          <p class="font-semibold">{{ x.razon_social || x.cuit }} · <span class="tabular-nums">{{ pesos(x.importe_fisco ?? x.importe_erp) }}</span></p>
-                          <p class="text-xs text-muted">{{ x.comentario }}@if (x.editado_por) { · Quitó {{ x.editado_por }} }</p>
-                        </div>
-                        @if (p.editar) {
-                          <button type="button" (click)="restaurar(x)" [disabled]="store.ocupado()" class="shrink-0 text-xs font-semibold text-brand-700 hover:underline disabled:opacity-50">Restaurar</button>
-                        }
-                      </li>
-                    }
-                  </ul>
-                </details>
-              }
-            }
-          }
-          @case ('conciliadas') {
-            <p class="mb-2 text-sm text-muted">Coinciden en ARCA y en el Libro Mayor al centavo. No piden nada.</p>
-            <ul class="divide-y divide-line rounded-xl border border-line bg-white text-sm">
-              @for (x of conciliadas(); track x.clave) {
-                <li class="flex items-baseline gap-3 px-4 py-2">
-                  <div class="min-w-0 flex-1">
-                    <p class="truncate font-semibold">{{ x.razon_social || 'Sin razón social' }}</p>
-                    <p class="truncate text-xs text-muted">{{ x.cuit }} · {{ x.impuesto }}@if (x.certificado) { · Cert. {{ x.certificado }} }</p>
-                  </div>
-                  <span class="shrink-0 tabular-nums">{{ pesos(x.importe_fisco) }}</span>
-                </li>
-              } @empty {
-                <li class="px-4 py-6 text-center text-muted">Ninguna partida concilió sola.</li>
-              }
-            </ul>
-          }
-          @case ('controles') {
-            <app-controles-lote [detalle]="det" [revisar]="p.revisar" [editar]="p.editar" />
-          }
-          @case ('versiones') {
-            <app-versiones-lote [detalle]="det" [editar]="p.editar && !p.revisar" [revisar]="p.revisar" [(evidencia)]="evidencia" />
-          }
-          @case ('historial') {
+        <details class="rounded-xl border border-line bg-white">
+          <summary class="cursor-pointer px-4 py-2 text-sm font-semibold">Versiones e historial</summary>
+          <div class="space-y-5 border-t border-line p-3">
+            <app-versiones-lote [detalle]="det" />
             <app-historial-lote [loteId]="det.lote.id" [version]="det.lote.version_vigente" />
-          }
-        }
+          </div>
+        </details>
       </div>
 
-      <app-acciones-lote [detalle]="det" [permisos]="p" [trabasEnviar]="trabasEnviar()" [trabasAprobar]="trabasAprobar()" [observacionesAbiertas]="observacionesAbiertas()" [(evidencia)]="evidencia" />
+      <app-acciones-lote [detalle]="det" [permisos]="p" [trabasEnviar]="trabasEnviar()" [trabasAprobar]="trabasAprobar()" [(evidencia)]="evidencia" />
     </section>
   } @else {
     <section class="flex items-center justify-center rounded-2xl border border-dashed border-line p-10 text-center text-muted">

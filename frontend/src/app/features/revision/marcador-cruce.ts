@@ -1,7 +1,7 @@
 import { Component, computed, input } from '@angular/core';
 import { pesos } from './revision.util';
 
-/** Los tres números del lote. Recibe centavos y se recalcula mientras se edita un importe. */
+/** Los tres números del lote. Recibe centavos. */
 @Component({
   selector: 'app-marcador-cruce',
   host: { class: 'grid grid-cols-3 gap-2' },

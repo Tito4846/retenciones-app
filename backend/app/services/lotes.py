@@ -225,18 +225,17 @@ def pesos(importe: str | None) -> str:
     return "$ " + f"{numero:,.2f}".replace(",", "_").replace(".", ",").replace("_", ".")
 
 
-def _faltas_partidas(c: sqlite3.Connection, lote: dict, partidas: list[dict]) -> list[dict]:
-    con_adjunto = {a["clave_partida"] for a in _adjuntos(c, lote["id"]) if a["clave_partida"]}
+def _faltas_partidas(partidas: list[dict]) -> list[dict]:
     errores = []
     for p in partidas:
-        for codigo, mensaje in V.requisitos(p, p["clave"] in con_adjunto):
+        for codigo, mensaje in V.requisitos(p):
             errores.append({"codigo": codigo, "mensaje": f"{mensaje}: {p['razon_social'] or p['cuit'] or p['documento_erp']} "
                             f"({p['estado']}, {pesos(p['importe_fisco'] or p['importe_erp'])}).", "clave": p["clave"]})
     return errores
 
 
-def compuertas(c: sqlite3.Connection, lote: dict, para: str) -> list[dict]:
-    """Lo que falta para enviar o aprobar (vacío = se puede)."""
+def compuertas(c: sqlite3.Connection, lote: dict, evidencia_nueva: int = 0) -> list[dict]:
+    """Lo que falta para enviar o aprobar (vacío = se puede). `evidencia_nueva`: los comprobantes que llegan en este pedido."""
     if lote["version_vigente"] == 0:
         return [{"codigo": "SIN_VERSION", "mensaje": "El lote no tiene versiones."}]
     version = _version_vigente(c, lote)
@@ -247,20 +246,14 @@ def compuertas(c: sqlite3.Connection, lote: dict, para: str) -> list[dict]:
         errores.append({"codigo": "VERSION_INVALIDA", "mensaje": f"La versión v{version['numero']} no pasó la validación."})
     if not partidas:
         errores.append({"codigo": "SIN_PARTIDAS", "mensaje": "La versión no tiene partidas: regenerala desde una conciliación."})
-    errores += _faltas_partidas(c, lote, partidas)
+    errores += _faltas_partidas(partidas)
+    excepciones = any(p["estado"] != P.CONCILIADO and not p["excluida"] for p in partidas)
+    if excepciones and not evidencia_nueva and not _adjuntos(c, lote["id"]):
+        errores.append({"codigo": "SIN_RESPALDO", "mensaje": "falta adjuntar al menos un comprobante"})
     errores += V.cuadre(partidas, version["total_libro_erp"], version["total_fisco"])
     neta = P.totales_netos(partidas)["neta"]
     if Decimal(neta) != 0:
         errores.append({"codigo": "DIFERENCIA_NETA", "mensaje": f"La diferencia neta es {pesos(neta)}: tiene que quedar en $ 0,00."})
-    if para == "aprobar":
-        marcados = {f["control"]: f["ok"] for f in c.execute(
-            "SELECT control, ok FROM control_revision WHERE lote_id = ? AND version_id = ?", (lote["id"], version["id"]))}
-        faltan = [texto for clave, texto in CONTROLES.items() if not marcados.get(clave)]
-        if faltan:
-            errores.append({"codigo": "CONTROLES", "mensaje": "Faltan tildar controles: " + "; ".join(faltan) + "."})
-        abiertas = c.execute("SELECT COUNT(*) FROM observacion WHERE lote_id = ? AND resuelta_utc IS NULL", (lote["id"],)).fetchone()[0]
-        if abiertas:
-            errores.append({"codigo": "OBSERVACIONES", "mensaje": f"Hay {abiertas} observación(es) sin resolver."})
     return errores
 
 
@@ -393,14 +386,20 @@ def regenerar(usuario: Usuario, lote_id: str, tarea, version_base: int) -> dict:
 
 
 def subir_version(usuario: Usuario, lote_id: str, contenido: bytes, nombre: str, version_base: int) -> dict:
-    """El Excel trabajado afuera vuelve como versión nueva, si pasa el pipeline de validación."""
+    """
+    El Excel trabajado afuera vuelve como versión nueva, si pasa el pipeline de
+    validación. Si lo sube el supervisor que revisa, es una corrección: el lote
+    sigue en revisión y eso no lo hace autor.
+    """
     _exigir_maker(usuario)
     with transaccion() as c:
         lote = _lote(c, lote_id)
-        _exigir_estado(lote, *EDITABLES)
+        _exigir_edicion(lote, usuario)
         _exigir_version(lote, version_base)
+        revisando = lote["estado"] == "en_revision"
         base = _version_vigente(c, lote)
-        resultado, nuevas = V.validar(contenido, lote, base, _partidas(c, base["id"]))
+        partidas_base = _partidas(c, base["id"])
+        resultado, nuevas = V.validar(contenido, lote, base, partidas_base)
         if resultado.errores:
             auditoria.registrar(c, usuario, "carga_rechazada", lote_id, base["id"], archivo=nombre, sha256=_sha(contenido),
                                 etapa=resultado.etapa_fallida, errores=resultado.errores[:50])
@@ -409,12 +408,25 @@ def subir_version(usuario: Usuario, lote_id: str, contenido: bytes, nombre: str,
                                   resultado.errores, validacion=resultado.a_dict())
         else:
             numero = base["numero"] + 1
-            version = _insertar_version(c, lote, numero, "subido", contenido, usuario, nuevas,
-                                        (base["total_libro_erp"], base["total_fisco"]), resultado.a_dict(), nombre)
+            _firmar_cambios(partidas_base, nuevas, usuario)
+            # Se guarda regenerado: si no, al bajarlo su _META seguiría diciendo la versión anterior.
+            normalizado = excel_lote.generar(contenido, nuevas, _meta(lote, numero))
+            version = _insertar_version(c, lote, numero, "subido", normalizado, usuario, nuevas,
+                                        (base["total_libro_erp"], base["total_fisco"]), resultado.a_dict(), nombre,
+                                        correccion_checker=revisando)
             auditoria.registrar(c, usuario, "version_subida", lote_id, version["id"], numero=numero, archivo=nombre,
-                                sha256=version["sha256"], cambiadas=resultado.resumen.get("cambiadas"))
+                                sha256=version["sha256"], sha256_archivo=_sha(contenido), cambiadas=resultado.resumen.get("cambiadas"),
+                                correccion_supervisor=revisando)
             return _detalle(c, lote_id)
     raise rechazo
+
+
+def _firmar_cambios(antes: list[dict], nuevas: list[dict], usuario: Usuario) -> None:
+    por_clave = {p["clave"]: p for p in antes}
+    ahora = ahora_utc()
+    for p in nuevas:
+        if any(p[k] != por_clave[p["clave"]][k] for k in excel_lote.COLUMNAS_LIBRES):
+            p.update(editado_por=usuario.nombre, editado_utc=ahora, editado_rol="supervisor" if usuario.tiene("supervisor") else "empleado")
 
 
 def _importe_ajustado(valor: str | None) -> str | None:
@@ -608,7 +620,7 @@ def enviar(usuario: Usuario, lote_id: str, version: int, comentario: str = "",
         lote = _lote(c, lote_id)
         _exigir_estado(lote, *EDITABLES)
         _exigir_version(lote, version)
-        faltas = compuertas(c, lote, "enviar")
+        faltas = compuertas(c, lote, len(evidencia))
         if faltas:
             raise _conflicto("Todavía no se puede enviar a revisión.", "COMPUERTA", faltas)
         vigente = _version_vigente(c, lote)
@@ -742,7 +754,7 @@ def aprobar(usuario: Usuario, lote_id: str, version: int, evidencia: list[tuple[
         if usuario.id in _autores(c, lote):
             raise _prohibido("No podés aprobar un lote que cargaste vos (segregación de funciones).", "SOD")
         _exigir_version(lote, version)
-        faltas = compuertas(c, lote, "aprobar")
+        faltas = compuertas(c, lote, len(evidencia))
         if faltas:
             raise _conflicto("Todavía no se puede aprobar.", "COMPUERTA", faltas)
         vigente = _version_vigente(c, lote)
@@ -857,7 +869,7 @@ def _detalle(c: sqlite3.Connection, lote_id: str) -> dict:
             con_adjunto[a["clave_partida"]] = con_adjunto.get(a["clave_partida"], 0) + 1
     for p in partidas:
         p["adjuntos"] = con_adjunto.get(p["clave"], 0)
-        p["faltas"] = [m for _, m in V.requisitos(p, p["adjuntos"] > 0)]
+        p["faltas"] = [m for _, m in V.requisitos(p)]
     controles = {}
     if vigente:
         controles = {f["control"]: {"ok": bool(f["ok"]), "usuario": f["usuario_nombre"], "fecha": f["fecha_utc"]}
@@ -867,7 +879,7 @@ def _detalle(c: sqlite3.Connection, lote_id: str) -> dict:
                      for o in c.execute("SELECT * FROM observacion WHERE lote_id = ? ORDER BY creado_utc", (lote_id,))]
     decisiones = [{**dict(d), "version": numeros.get(d["version_id"])}
                   for d in c.execute("SELECT * FROM decision WHERE lote_id = ? ORDER BY fecha_utc", (lote_id,))]
-    abierto = lote["estado"] not in ("aprobado", "anulado")
+    faltas = compuertas(c, lote) if lote["estado"] not in ("aprobado", "anulado") else []
     return {
         "lote": {**lote, "autores": sorted(_autores(c, lote))},
         "versiones": versiones,
@@ -879,8 +891,8 @@ def _detalle(c: sqlite3.Connection, lote_id: str) -> dict:
         "decisiones": decisiones,
         "exportaciones": [dict(e) for e in c.execute("SELECT * FROM exportacion_fiscal WHERE lote_id = ?", (lote_id,))],
         "compuertas": {
-            "enviar": compuertas(c, lote, "enviar") if abierto else [],
-            "aprobar": compuertas(c, lote, "aprobar") if abierto else [],
+            "enviar": faltas,
+            "aprobar": faltas,
         },
     }
 

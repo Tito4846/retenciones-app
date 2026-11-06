@@ -11,18 +11,9 @@ import {
   LoteListado,
   Notificacion,
   NuevoLote,
-  OrigenObservacion,
 } from '../models/lote.models';
 import { ConciliacionService } from './conciliacion.service';
 import { SesionService } from './sesion.service';
-
-/** Lo que se puede corregir de una partida. `importe_ajustado: null` borra el ajuste. */
-export interface CambioPartida {
-  justificacion?: string;
-  comentario?: string;
-  importe_ajustado?: string | null;
-  excluida?: boolean;
-}
 
 /** Los lotes de conciliación y su circuito de revisión (Maker-Checker). */
 @Injectable({ providedIn: 'root' })
@@ -136,17 +127,6 @@ export class LotesStore {
     return this.accion(this.http.post<DetalleLote>(`${this.api}/${loteId}/versiones`, datos), this.errorExcel);
   }
 
-  actualizarPartida(loteId: string, clave: string, version: number, cambios: CambioPartida): Observable<boolean> {
-    return this.accion(this.http.patch<DetalleLote>(`${this.api}/${loteId}/partidas/${clave}`, { version, ...cambios }));
-  }
-
-  subirAdjunto(loteId: string, archivo: File, clave: string | null): Observable<boolean> {
-    const datos = new FormData();
-    datos.append('archivo', archivo);
-    if (clave) datos.append('clave_partida', clave);
-    return this.accion(this.http.post<DetalleLote>(`${this.api}/${loteId}/adjuntos`, datos));
-  }
-
   retirarAdjunto(loteId: string, adjuntoId: string): Observable<boolean> {
     return this.accion(this.http.delete<DetalleLote>(`${this.api}/${loteId}/adjuntos/${adjuntoId}`));
   }
@@ -159,18 +139,6 @@ export class LotesStore {
 
   tomar(loteId: string): Observable<boolean> {
     return this.accion(this.http.post<DetalleLote>(`${this.api}/${loteId}/tomar`, {}));
-  }
-
-  marcarControl(loteId: string, control: string, version: number, ok: boolean): Observable<boolean> {
-    return this.accion(this.http.put<DetalleLote>(`${this.api}/${loteId}/controles/${control}`, { version, ok }));
-  }
-
-  observar(loteId: string, version: number, texto: string, origen: OrigenObservacion, clave: string | null): Observable<boolean> {
-    return this.accion(this.http.post<DetalleLote>(`${this.api}/${loteId}/observaciones`, { version, texto, origen, clave_partida: clave }));
-  }
-
-  resolver(loteId: string, observacionId: string, resuelta: boolean): Observable<boolean> {
-    return this.accion(this.http.patch<DetalleLote>(`${this.api}/${loteId}/observaciones/${observacionId}`, { resuelta }));
   }
 
   rechazar(loteId: string, version: number, motivo: string): Observable<boolean> {

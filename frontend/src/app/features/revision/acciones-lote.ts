@@ -1,7 +1,7 @@
 import { Component, computed, inject, input, linkedSignal, model } from '@angular/core';
-import { DetalleLote, Observacion } from '../../core/models/lote.models';
+import { DetalleLote } from '../../core/models/lote.models';
 import { LotesStore } from '../../core/services/lotes.store';
-import { Permisos, pesos } from './revision.util';
+import { Permisos } from './revision.util';
 
 const SIN_AUTOAPROBACION = 'No podés aprobar un lote que vos mismo preparaste';
 
@@ -88,7 +88,7 @@ const SIN_AUTOAPROBACION = 'No podés aprobar un lote que vos mismo preparaste';
             class="rounded-lg bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-800 disabled:opacity-50">Pasármelo a mí</button>
         }
         @if (p.revisar) {
-          <button type="button" (click)="devolver()" [disabled]="store.ocupado()"
+          <button type="button" (click)="confirmar.set('rechazar')" [disabled]="store.ocupado()"
             class="rounded-lg border border-red-300 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50">Devolver para Corregir</button>
         }
         @if (p.revisar || p.autor) {
@@ -109,7 +109,6 @@ export class AccionesLote {
   readonly permisos = input.required<Permisos>();
   readonly trabasEnviar = input.required<string[]>();
   readonly trabasAprobar = input.required<string[]>();
-  readonly observacionesAbiertas = input<Observacion[]>([]);
   /** Se manda con la confirmación y se vacía solo si salió bien. */
   readonly evidencia = model<File[]>([]);
 
@@ -150,17 +149,6 @@ export class AccionesLote {
       this.nota.set('');
       this.evidencia.set([]);
     });
-  }
-
-  /** «Devolver»: el motivo arranca con las observaciones abiertas, para no escribir dos veces lo mismo. */
-  protected devolver(): void {
-    const lineas = this.observacionesAbiertas().map((o) => {
-      const p = this.detalle().partidas.find((x) => x.clave === o.clave_partida);
-      const donde = p ? `${p.razon_social || p.cuit} ${pesos(p.importe_fisco ?? p.importe_erp)}: ` : '';
-      return `- ${donde}${o.texto}`;
-    });
-    this.motivo.set(lineas.length ? `Corregir:\n${lineas.join('\n')}` : '');
-    this.confirmar.set('rechazar');
   }
 
   protected confirmarAccion(): void {

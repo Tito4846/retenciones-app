@@ -53,7 +53,7 @@ class Resultado:
                 "advertencias": self.advertencias, "resumen": self.resumen}
 
 
-def requisitos(partida: dict, con_adjunto: bool) -> list[tuple[str, str]]:
+def requisitos(partida: dict) -> list[tuple[str, str]]:
     """Lo que le falta a una partida para poder enviarse: [(codigo, mensaje)]."""
     faltas = []
     if partida["estado"] == P.CONCILIADO:
@@ -61,13 +61,11 @@ def requisitos(partida: dict, con_adjunto: bool) -> list[tuple[str, str]]:
     con_texto = bool((partida.get("comentario") or "").strip())
     if partida.get("excluida"):
         return [] if con_texto else [("SIN_COMENTARIO", "Falta el motivo por el que se quitó")]
-    # Toda excepción lleva tipo, explicación y respaldo: no hay excepciones sin papeles.
+    # Los comprobantes son del lote entero: esa compuerta está en lotes.compuertas.
     if not partida.get("justificacion"):
         faltas.append(("SIN_JUSTIFICACION", "Falta elegir el tipo de justificación"))
     if not con_texto:
         faltas.append(("SIN_COMENTARIO", "Falta escribir la justificación"))
-    if not con_adjunto:
-        faltas.append(("SIN_RESPALDO", "Falta el archivo de respaldo"))
     return faltas
 
 
@@ -163,7 +161,7 @@ def validar(contenido: bytes, lote: dict, base: dict, partidas_base: list[dict])
             valor = f[campo]
             if valor and len(valor) != 10:
                 r.error(2, "FECHA_INVALIDA", f"{_formato(_titulo(campo), numero)} no tiene una fecha válida («{valor}»).", hoja=X.HOJA, fila=numero, columna=_titulo(campo))
-        for campo in X.COLUMNAS_IMPORTE:
+        for campo in (*X.COLUMNAS_IMPORTE, "importe_ajustado"):
             valor = f[campo]
             if valor is None:
                 continue
@@ -172,8 +170,13 @@ def validar(contenido: bytes, lote: dict, base: dict, partidas_base: list[dict])
                 Decimal(valor)
             except InvalidOperation:
                 problema = problema or f"no tiene un importe válido («{valor}»)"
+            else:
+                if campo == "importe_ajustado" and Decimal(valor) < 0:
+                    problema = f"no puede ser negativa («{valor}»)"
             if problema:
                 r.error(2, "IMPORTE_INVALIDO", f"{_formato(_titulo(campo), numero)} {problema}.", hoja=X.HOJA, fila=numero, columna=_titulo(campo))
+        if f["excluida"] and f["excluida"].lower() not in ("sí", "si"):
+            r.error(2, "EXCLUIDA_INVALIDA", f"{_formato('Excluida', numero)} dice «{f['excluida']}»: escribí Sí o dejala vacía.", hoja=X.HOJA, fila=numero, columna="Excluida")
         if len(f["comentario"] or "") > 2000:
             r.error(2, "COMENTARIO_LARGO", f"{_formato('Comentario', numero)} supera los 2000 caracteres.", hoja=X.HOJA, fila=numero, columna="Comentario")
     if r.corte(2):
@@ -198,6 +201,11 @@ def validar(contenido: bytes, lote: dict, base: dict, partidas_base: list[dict])
                     r.error(3, "COLUMNA_ALTERADA", f"Se modificó la columna bloqueada «{_titulo(campo)}» en la fila {numero}: "
                             f"decía «{original[campo] or 'vacío'}» y ahora dice «{f[campo] or 'vacío'}».", hoja=X.HOJA,
                             fila=numero, columna=_titulo(campo), esperado=original[campo], encontrado=f[campo])
+        excluida = 1 if f["excluida"] else 0
+        if original["estado"] == P.CONCILIADO and (f["importe_ajustado"], excluida) != (original["importe_ajustado"], original["excluida"]):
+            r.error(3, "CONCILIADA", f"La fila {numero} concilió sola: no se ajusta ni se excluye.", hoja=X.HOJA, fila=numero)
+        if excluida and not (f["comentario"] or "").strip():
+            r.error(3, "MOTIVO", f"La fila {numero} está excluida: contá el motivo en la columna «Comentario».", hoja=X.HOJA, fila=numero, columna="Comentario")
     for clave, original in por_clave.items():
         if clave not in vistas:
             r.error(3, "FILA_QUITADA", f"Falta la partida de {original['razon_social'] or original['cuit']} por {original['importe_fisco'] or original['importe_erp']}.",
@@ -216,11 +224,12 @@ def validar(contenido: bytes, lote: dict, base: dict, partidas_base: list[dict])
     nuevas = []
     for _, f in leidas:
         original = por_clave[f["clave"]]
-        nuevas.append({**original, "justificacion": f["justificacion"] or "", "comentario": (f["comentario"] or "").strip()})
+        nuevas.append({**original, "justificacion": f["justificacion"] or "", "comentario": (f["comentario"] or "").strip(),
+                       "importe_ajustado": f["importe_ajustado"], "excluida": 1 if f["excluida"] else 0})
 
     # 4) Negocio (se exige al enviar; acá avisa)
     for numero, p in zip((n for n, _ in leidas), nuevas, strict=True):
-        for codigo, mensaje in requisitos(p, con_adjunto=True):
+        for codigo, mensaje in requisitos(p):
             r.aviso(4, codigo, mensaje, hoja=X.HOJA, fila=numero, clave=p["clave"])
 
     # 5) Cuadre (recalculado acá: no se confía en los totales que trae el Excel)
@@ -228,8 +237,7 @@ def validar(contenido: bytes, lote: dict, base: dict, partidas_base: list[dict])
         r.error(5, e["codigo"], e["mensaje"], hoja=X.HOJA, fila=fila_totales)
     r.corte(5)
     r.resumen = {**P.resumen(nuevas), "filas": len(nuevas),
-                 "cambiadas": sum(1 for p in nuevas if (p["justificacion"], p["comentario"]) != (
-                     por_clave[p["clave"]]["justificacion"], por_clave[p["clave"]]["comentario"]))}
+                 "cambiadas": sum(1 for p in nuevas if any(p[k] != por_clave[p["clave"]][k] for k in X.COLUMNAS_LIBRES))}
     return r, nuevas if not r.errores else []
 
 

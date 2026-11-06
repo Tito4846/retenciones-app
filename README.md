@@ -141,12 +141,14 @@ El diseño completo está en [docs/diseno-revision.md](docs/diseno-revision.md).
 - Desde **Conciliación**, el empleado toca «Generar Lote para Revisión» y confirma (cliente, CUIT y período salen del cruce; con archivos subidos a mano se escribe solo lo que falta): se genera la v1 del lote con
   cada partida clasificada (Conciliado Automático, Diferencia de Monto, Pendiente de Comprobante,
   No Localizado en ERP / en Fisco) y un código de discrepancia. El Excel suma las hojas
-  `CONCILIACION` (protegida: solo se editan Justificación y Comentario) y `_META` (oculta).
-- **Revisión** es una bandeja: los lotes a la izquierda y, a la derecha, solo las partidas que no
-  conciliaron solas. Cada excepción necesita tipo de justificación, texto y archivo de respaldo.
+  `CONCILIACION` (protegida: solo se editan Justificación, Comentario, Importe ajustado y Excluida) y `_META` (oculta).
+- **Revisión** es una bandeja: los lotes a la izquierda y, a la derecha, el lote con sus totales y su
+  gestor de archivos. El trabajo se hace en Excel: se baja, se completa cada excepción y se sube; si está
+  mal, la pantalla dice qué fila corregir. Los comprobantes se arrastran a la caja global y viajan con el
+  envío o la aprobación (un lote con excepciones lleva al menos uno).
   La diferencia neta (ARCA contra Libro Mayor) tiene que quedar en $ 0,00 para enviar y para aprobar:
-  se resuelve cargando un **importe ajustado** o quitando la fila con un motivo. Los importes de las
-  fuentes no se tocan: el ajuste va aparte y una fila quitada sigue registrada y se puede restaurar.
+  se resuelve con la columna **Importe ajustado** o marcando **Excluida** con un motivo. Los importes de las
+  fuentes no se tocan: el ajuste va aparte y una fila excluida sigue registrada.
 - El empleado también puede bajar el Excel, trabajarlo y subirlo como versión nueva: pasa por una validación de 6 etapas
   (archivo, estructura, sintaxis, integridad de columnas bloqueadas, reglas, cuadre al centavo).
 - Al enviarlo, la versión queda sellada. Un supervisor que **no** lo haya preparado lo toma,

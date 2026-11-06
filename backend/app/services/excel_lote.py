@@ -2,7 +2,8 @@
 Las hojas del lote dentro del papel de trabajo:
 
 * CONCILIACION — una fila por partida con su estado y código. Protegida: solo
-  Justificación y Comentario quedan para escribir. Totales al pie con fórmulas.
+  Justificación, Comentario, Importe ajustado y Excluida quedan para escribir.
+  Totales al pie con fórmulas.
 * _META        — muy oculta: lote, versión base y el hash de cada fila, para
   reconocer el archivo cuando vuelve subido.
 
@@ -11,6 +12,7 @@ Las hojas ARCA y LIBRO MAYOR (las del exportador) no se tocan.
 
 import io
 from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill, Protection
@@ -36,6 +38,8 @@ ENCABEZADOS = [c[0] for c in COLUMNAS]
 CAMPO = {c[0]: c[1] for c in COLUMNAS}
 COLUMNAS_IMPORTE = ("importe_fisco", "importe_erp", "diferencia")
 COLUMNAS_FECHA = ("fecha_fisco", "fecha_erp")
+# El Excel es el único lugar donde se trabaja la partida: también lleva el ajuste y la exclusión.
+COLUMNAS_LIBRES = (*P.CAMPOS_EDITABLES, "importe_ajustado", "excluida")
 TITULO_TOTALES = "TOTALES"
 CLAVE_PROTECCION = "retenciones"
 
@@ -81,7 +85,7 @@ def _escribir_hojas(libro: Workbook, partidas: list[dict], meta: dict) -> None:
         hoja.column_dimensions[get_column_letter(col)].width = ancho
     hoja.freeze_panes = "B2"
 
-    editables = {i for i, c in enumerate(COLUMNAS, start=1) if c[1] in P.CAMPOS_EDITABLES}
+    editables = {i for i, c in enumerate(COLUMNAS, start=1) if c[1] in COLUMNAS_LIBRES}
     for f, partida in enumerate(partidas, start=2):
         relleno = PatternFill("solid", fgColor=_COLOR.get(partida["estado"], "FFFFFFFF"))
         for col, (_, campo, _) in enumerate(COLUMNAS, start=1):
@@ -110,6 +114,11 @@ def _escribir_hojas(libro: Workbook, partidas: list[dict], meta: dict) -> None:
     hoja.add_data_validation(lista)
     if partidas:
         lista.add(f"{_letra('justificacion')}2:{_letra('justificacion')}{ultima}")
+    excluida = DataValidation(type="list", formula1='"Sí"', allow_blank=True)
+    excluida.error, excluida.errorTitle = "Escribí Sí para quitarla, o dejala vacía.", "Excluida"
+    hoja.add_data_validation(excluida)
+    if partidas:
+        excluida.add(f"{_letra('excluida')}2:{_letra('excluida')}{ultima}")
     hoja.protection.sheet = True
     hoja.protection.password = CLAVE_PROTECCION
     hoja.protection.formatColumns = False
@@ -141,13 +150,20 @@ def tiene_letras(valor) -> bool:
     return isinstance(valor, str) and any(c.isalpha() for c in valor)
 
 
+def _legible(valor) -> bool:
+    try:
+        return Decimal(str(valor).strip()).is_finite()
+    except InvalidOperation:
+        return False
+
+
 def a_texto(campo: str, valor) -> str | None:
     """Una celda leída, en la forma en que se guarda la partida."""
     if valor is None or (isinstance(valor, str) and not valor.strip()):
-        return None if campo in (*COLUMNAS_IMPORTE, *COLUMNAS_FECHA) else ""
-    if campo in COLUMNAS_IMPORTE:
-        # Con letras queda tal cual para que la validación lo marque: dec() las volvería 0.00.
-        return str(valor).strip() if tiene_letras(valor) else P.importe(valor)
+        return None if campo in (*COLUMNAS_IMPORTE, *COLUMNAS_FECHA, "importe_ajustado") else ""
+    if campo in (*COLUMNAS_IMPORTE, "importe_ajustado"):
+        # Lo ilegible queda tal cual para que la validación lo marque: dec() lo volvería 0.00.
+        return P.importe(str(valor).strip()) if _legible(valor) else str(valor).strip()
     if campo in COLUMNAS_FECHA:
         if isinstance(valor, datetime):
             return valor.date().isoformat()

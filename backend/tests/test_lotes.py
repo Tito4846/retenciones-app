@@ -119,14 +119,6 @@ def test_ciclo_completo_maker_checker(ruta_arca, ruta_mayor):
     lote = cliente.post(base + "/enviar", data={"version": 2}, headers=ANA).json()
     cliente.post(base + "/tomar", headers=LUIS)
 
-    # Para aprobar: controles tildados y observaciones resueltas.
-    r = cliente.post(base + "/aprobar", data={"version": 2}, headers=LUIS)
-    assert r.status_code == 409 and {e["codigo"] for e in r.json()["detail"]["errores"]} == {"CONTROLES", "OBSERVACIONES"}
-    for control in cliente.get("/api/lotes/catalogo").json()["controles"]:
-        cliente.put(f"{base}/controles/{control}", json={"version": 2, "ok": True}, headers=LUIS)
-    obs = lote["observaciones"][0]["id"]
-    cliente.patch(f"{base}/observaciones/{obs}", json={"resuelta": True}, headers=LUIS)
-    # Versión vieja: no se aprueba algo distinto de lo que se vio.
     assert cliente.post(base + "/aprobar", data={"version": 1}, headers=LUIS).json()["detail"]["codigo"] == "VERSION_VIEJA"
     lote = cliente.post(base + "/aprobar", data={"version": 2}, headers=LUIS).json()
     assert lote["lote"]["estado"] == "aprobado" and lote["lote"]["hash_aprobado"]
@@ -465,10 +457,7 @@ def test_cuit_modificada_dice_que_cambio(ruta_arca, ruta_mayor):
 
 
 def _listo_para_aprobar(ruta_arca, ruta_mayor) -> str:
-    _, base = _en_revision(ruta_arca, ruta_mayor)
-    for control in cliente.get("/api/lotes/catalogo").json()["controles"]:
-        assert cliente.put(f"{base}/controles/{control}", json={"version": 1, "ok": True}, headers=LUIS).status_code == 200
-    return base
+    return _en_revision(ruta_arca, ruta_mayor)[1]
 
 
 def _pdf(nombre: str = "comprobante.pdf", cuerpo: bytes = b"%PDF-1.4 evidencia") -> tuple:
@@ -500,9 +489,11 @@ def test_la_evidencia_queda_dentro_del_sello_de_aprobacion(ruta_arca, ruta_mayor
 
 
 def test_si_no_se_aprueba_no_queda_ninguna_evidencia(ruta_arca, ruta_mayor):
-    lote, base = _en_revision(ruta_arca, ruta_mayor)  # sin los controles tildados
+    lote, base = _en_revision(ruta_arca, ruta_mayor)
     previos = len(lote["adjuntos"])
-    r = cliente.post(base + "/aprobar", data={"version": 1}, files=[_pdf()], headers=LUIS)
+    clave = next(p["clave"] for p in lote["partidas"] if p["estado"] != "Conciliado Automático")
+    assert cliente.patch(f"{base}/partidas/{clave}", json={"version": 1, "importe_ajustado": "1.00"}, headers=LUIS).status_code == 200
+    r = cliente.post(base + "/aprobar", data={"version": 2}, files=[_pdf()], headers=LUIS)
     assert r.status_code == 409 and r.json()["detail"]["codigo"] == "COMPUERTA"
     assert len(cliente.get(base, headers=LUIS).json()["adjuntos"]) == previos
 
@@ -517,3 +508,102 @@ def test_evidencia_invalida_frena_la_aprobacion(ruta_arca, ruta_mayor, nombre, c
     r = cliente.post(base + "/aprobar", data={"version": 1}, files=[_pdf(), _pdf(nombre, cuerpo)], headers=LUIS)
     assert r.status_code == estado and r.json()["detail"]["codigo"] == codigo
     assert cliente.get(base, headers=LUIS).json()["lote"]["estado"] == "en_revision"
+
+
+# --- Todo el trabajo por Excel ---------------------------------------------
+
+
+def _trabajar_excel(libro, comentario: str = "Ver nota de crédito") -> None:
+    """Completa cada excepción en el Excel y lleva la diferencia neta a cero."""
+    hoja = libro["CONCILIACION"]
+    for fila in range(2, hoja.max_row + 1):
+        estado = hoja[f"B{fila}"].value
+        if not estado or estado == "Conciliado Automático":
+            continue
+        hoja[f"P{fila}"] = "Diferencia temporal (se registra en otro período)"
+        hoja[f"Q{fila}"] = comentario
+        hoja[f"R{fila}"] = hoja[f"M{fila}"].value or 0
+
+
+def test_el_excel_alcanza_para_dejar_el_lote_listo(ruta_arca, ruta_mayor):
+    lote = _lote(ruta_arca, ruta_mayor)
+    base = f"/api/lotes/{lote['lote']['id']}"
+    libro = _bajar(lote["lote"]["id"], 1)
+    _trabajar_excel(libro)
+    r = _subir_version(lote["lote"]["id"], libro, 1)
+    assert r.status_code == 201, r.text
+    lote = r.json()
+    assert lote["totales"]["neta"] == "0.00"
+    assert [e["codigo"] for e in lote["compuertas"]["enviar"]] == ["SIN_RESPALDO"]
+    assert all(p["editado_por"] == "Ana" for p in lote["partidas"] if p["estado"] != "Conciliado Automático")
+    # El comprobante que llega con el envío cuenta para la compuerta.
+    assert cliente.post(base + "/enviar", data={"version": 2}, headers=ANA).json()["detail"]["codigo"] == "COMPUERTA"
+    assert cliente.post(base + "/enviar", data={"version": 2}, files=[_pdf()], headers=ANA).status_code == 200
+    assert cliente.post(base + "/tomar", headers=LUIS).status_code == 200
+    r = cliente.post(base + "/aprobar", data={"version": 2}, headers=LUIS)
+    assert r.status_code == 200 and r.json()["lote"]["estado"] == "aprobado"
+
+
+def test_excluir_una_fila_desde_el_excel(ruta_arca, ruta_mayor):
+    lote = _lote(ruta_arca, ruta_mayor)
+    lote_id = lote["lote"]["id"]
+    excepcion = next(p for p in lote["partidas"] if p["estado"] != "Conciliado Automático")
+    fila = lote["partidas"].index(excepcion) + 2
+    libro = _bajar(lote_id, 1)
+    libro["CONCILIACION"][f"S{fila}"] = "Sí"
+    errores = _subir_version(lote_id, libro, 1).json()["detail"]["errores"]
+    assert [e["codigo"] for e in errores] == ["MOTIVO"]
+    libro["CONCILIACION"][f"Q{fila}"] = "Asiento duplicado"
+    lote = _subir_version(lote_id, libro, 1).json()
+    assert next(p for p in lote["partidas"] if p["clave"] == excepcion["clave"])["excluida"] == 1
+
+
+def test_lo_conciliado_solo_tampoco_se_ajusta_por_excel(ruta_arca, ruta_mayor):
+    lote = _lote(ruta_arca, ruta_mayor)
+    lote_id = lote["lote"]["id"]
+    with sqlite3.connect(db.ruta_db()) as c:
+        c.execute("UPDATE partida SET estado = 'Conciliado Automático' WHERE clave = ?", (lote["partidas"][0]["clave"],))
+    libro = _bajar(lote_id, 1)
+    libro["CONCILIACION"]["B2"] = "Conciliado Automático"
+    libro["CONCILIACION"]["R2"] = 1
+    assert _subir_version(lote_id, libro, 1).json()["detail"]["errores"][0]["codigo"] == "CONCILIADA"
+
+
+@pytest.mark.parametrize(("valor", "texto"), [("abc", "contiene letras"), ("1-2", "no tiene un importe válido"), (-5, "no puede ser negativa")])
+def test_importe_ajustado_invalido(ruta_arca, ruta_mayor, valor, texto):
+    lote = _lote(ruta_arca, ruta_mayor)
+    fila = next(i for i, p in enumerate(lote["partidas"], start=2) if p["estado"] != "Conciliado Automático")
+    libro = _bajar(lote["lote"]["id"], 1)
+    libro["CONCILIACION"][f"R{fila}"] = valor
+    error = _subir_version(lote["lote"]["id"], libro, 1).json()["detail"]["errores"][0]
+    assert error["codigo"] == "IMPORTE_INVALIDO" and texto in error["mensaje"]
+
+
+def test_el_excel_subido_se_puede_bajar_y_volver_a_subir(ruta_arca, ruta_mayor):
+    lote_id = _lote(ruta_arca, ruta_mayor)["lote"]["id"]
+    libro = _bajar(lote_id, 1)
+    _trabajar_excel(libro)
+    assert _subir_version(lote_id, libro, 1).status_code == 201
+    libro = _bajar(lote_id, 2)
+    _trabajar_excel(libro, "Segunda vuelta")
+    r = _subir_version(lote_id, libro, 2)
+    assert r.status_code == 201, r.text
+    assert r.json()["lote"]["version_vigente"] == 3
+
+
+def test_el_supervisor_sube_un_excel_corregido_sin_devolver(ruta_arca, ruta_mayor):
+    lote, base = _en_revision(ruta_arca, ruta_mayor)
+    lote_id = lote["lote"]["id"]
+    libro = _bajar(lote_id, 1)
+    _trabajar_excel(libro, "Corregido por Luis")
+    salida = io.BytesIO()
+    libro.save(salida)
+    subir = lambda quien: cliente.post(f"{base}/versiones", data={"version_base": "1"}, files={"archivo": ("x.xlsx", salida.getvalue())}, headers=quien)  # noqa: E731
+    assert subir(ANA).status_code == 403
+    r = subir(LUIS)
+    assert r.status_code == 201, r.text
+    lote = r.json()
+    assert lote["lote"]["estado"] == "en_revision" and lote["lote"]["checker_id"] == "luis" and "luis" not in lote["lote"]["autores"]
+    assert lote["versiones"][0]["correccion_checker"] == 1
+    r = cliente.post(base + "/aprobar", data={"version": 2}, headers=LUIS)
+    assert r.status_code == 200 and r.json()["lote"]["estado"] == "aprobado"

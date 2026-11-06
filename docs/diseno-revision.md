@@ -113,7 +113,9 @@ Además, flags de auditoría preliminar por partida: `DUP` (posible duplicado),
 
 1. La última versión pasó el pipeline de validación sin errores.
 2. Toda partida ≠ `Conciliado Automático` que no esté quitada tiene tipo de
-   justificación, texto y **al menos un adjunto**. Una partida quitada solo pide el motivo.
+   justificación y texto. Una partida quitada solo pide el motivo. Si queda alguna
+   excepción, el lote lleva **al menos un comprobante** (general, puede llegar en la
+   misma confirmación).
 3. **Cuadre al centavo** (con `Decimal`): Σ importe ERP del archivo = total del
    libro de retenciones del período (snapshot) y Σ importe Fisco = total ARCA.
    La diferencia ARCA − Mayor debe quedar explicada por las partidas no
@@ -126,8 +128,12 @@ Solo para aprobar:
 
 5. Usuario con rol `supervisor`, distinto de todo autor de versiones del lote (SoD).
    Las versiones de corrección del supervisor (`correccion_checker = 1`) no lo hacen autor.
-6. Todos los controles tildados y ninguna observación abierta.
-7. La `version` enviada es la vigente.
+6. La `version` enviada es la vigente.
+
+La aprobación es la conformidad del supervisor: ya no hay controles para tildar ni
+observaciones por fila que resolver. Para pedir cambios se devuelve con un motivo.
+Las excepciones solo se completan subiendo el Excel, así que un lote con excepciones
+no llega a aprobarse sin un Excel validado. Uno que concilió todo solo no necesita subirlo.
 
 ### 1.5 Correcciones en pantalla
 
@@ -353,7 +359,7 @@ guardado, historial → auditoría con `user_id` = nombre escrito).
   Criterio, CUIT, Razón social, Impuesto, Certificado, Documento ERP, Fecha
   Fisco, Fecha ERP, Importe Fisco, Importe ERP, Diferencia, **Justificación**
   (lista desplegable), **Comentario**, Importe ajustado, Excluida.
-  Protegida: solo Justificación y Comentario quedan desbloqueadas. Totales al pie
+  Protegida: solo Justificación, Comentario, Importe ajustado y Excluida quedan desbloqueadas. Totales al pie
   con fórmulas (bloqueadas).
 - Hoja `_META` (muy oculta): lote_id, versión base, fecha de generación, hash de
   cada fila y de los totales, versión del formato.
