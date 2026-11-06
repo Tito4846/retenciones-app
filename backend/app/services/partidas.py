@@ -5,11 +5,12 @@ auditoría preliminar.
 
 Estados (sobre los cuatro campos clave: CUIT, certificado, fecha e importe):
 
-* Conciliado Automático   — par con los cuatro coincidentes (fecha dentro de la tolerancia).
+* Conciliado Automático   — par del mismo agente e importe, con la fecha dentro de
+  la tolerancia. El certificado no hace falta: Xubio casi nunca lo carga en el asiento.
 * Diferencia de Monto     — par con importes distintos (D01).
-* Pendiente de Comprobante — par por un criterio débil: el asiento no tiene el
-  certificado (P01), la CUIT no coincide (P02), la fecha está fuera de la
-  tolerancia (P03) o lo emparejó una persona (P04).
+* Pendiente de Comprobante — par por un criterio débil: solo coinciden importe y
+  fecha, sin nada que confirme al agente (P01), la CUIT no coincide (P02), la fecha
+  está fuera de la tolerancia (P03) o lo emparejó una persona (P04).
 * No Localizado en ERP    — está en ARCA y no en el Libro Mayor (N01).
 * No Localizado en Fisco  — está en el Libro Mayor del período y no en ARCA (N02).
 """
@@ -21,7 +22,7 @@ from datetime import date
 from decimal import Decimal
 
 from app.core.config import settings
-from app.services.conciliador import CRITERIO_COMPROBANTE, CRITERIO_MANUAL
+from app.services.conciliador import CRITERIO_IMPORTE_FECHA, CRITERIO_MANUAL
 from app.services.normalizacion import normalizar_arca, normalizar_comprobante, normalizar_mayor
 from app.services.tools import dec, formatear_cuit, parse_fecha
 
@@ -34,7 +35,7 @@ ESTADOS = (CONCILIADO, DIFERENCIA, PENDIENTE, NO_EN_ERP, NO_EN_FISCO)
 
 CODIGOS = {
     "D01": "Importe distinto entre ARCA y el asiento",
-    "P01": "El asiento no tiene el número de certificado",
+    "P01": "Coinciden importe y fecha, pero nada confirma que sea el mismo agente",
     "P02": "La CUIT del asiento no coincide con la de ARCA",
     "P03": "Fecha fuera de la tolerancia",
     "P04": "Emparejada a mano",
@@ -109,7 +110,7 @@ def _estado_par(c: dict, r: dict, m: dict, tolerancia: int) -> tuple[str, str]:
         return PENDIENTE, "P02"
     if dias is not None and dias > tolerancia:
         return PENDIENTE, "P03"
-    if c["criterio"] != CRITERIO_COMPROBANTE:
+    if c["criterio"] == CRITERIO_IMPORTE_FECHA:
         return PENDIENTE, "P01"
     return CONCILIADO, ""
 

@@ -357,6 +357,44 @@ def crear(usuario: Usuario, tarea, empresa: str, cuit_empresa: str, periodo: str
         return _detalle(c, lote["id"])
 
 
+def desde_cruce(usuario: Usuario, tarea) -> dict:
+    """
+    Lo que sigue solo al terminar el cruce: arma el lote del cliente y período (o
+    le suma una versión si los datos cambiaron) y, si no quedó nada para resolver,
+    lo manda directo al supervisor.
+    """
+    _exigir_maker(usuario)
+    partidas, _, _ = _desde_cruce(tarea)
+    resumen = tarea.resultado["resumen"]
+    empresa, cuit, periodo = (resumen.get(k) or "" for k in ("empresa", "cuit_empresa", "periodo"))
+    if not (empresa or cuit) or not periodo:
+        raise ErrorDeLote(422, "SIN_IDENTIDAD", "Los archivos no dicen de qué cliente son: generá el lote desde Conciliación.")
+    with transaccion() as c:
+        fila = c.execute(
+            "SELECT * FROM lote WHERE estado <> 'anulado' AND periodo = ? AND "
+            "((? <> '' AND cuit_empresa = ?) OR (? = '' AND empresa = ?)) AND id NOT IN "
+            "(SELECT rectifica_a FROM lote WHERE rectifica_a IS NOT NULL)",
+            (periodo, cuit, cuit, cuit, empresa)).fetchone()
+        lote = dict(fila) if fila else None
+        sin_cambios = bool(lote) and (
+            {p["clave"]: p["hash_fila"] for p in _partidas(c, _version_vigente(c, lote)["id"])}
+            == {p["clave"]: p["hash_fila"] for p in partidas})
+    if lote is None:
+        armado = crear(usuario, tarea, empresa, cuit, periodo, "Generado al terminar la conciliación.")
+    elif lote["estado"] not in EDITABLES:
+        raise _conflicto(f"El lote de {lote['empresa']} para {periodo} ya está en verificación: la conciliación nueva no lo cambió.",
+                         "LOTE_REPETIDO")
+    elif sin_cambios:
+        armado = detalle(lote["id"])
+    else:
+        armado = regenerar(usuario, lote["id"], tarea, lote["version_vigente"])
+    actual = armado["lote"]
+    # Un lote devuelto espera que alguien atienda el motivo: no vuelve solo.
+    if actual["estado"] == "borrador" and partidas and not armado["compuertas"]["enviar"]:
+        return enviar(usuario, actual["id"], actual["version_vigente"], "Enviado solo: la conciliación no dejó nada para resolver.")
+    return armado
+
+
 def regenerar(usuario: Usuario, lote_id: str, tarea, version_base: int) -> dict:
     """Versión nueva desde una conciliación rehecha. Las justificaciones se copian por partida."""
     _exigir_maker(usuario)

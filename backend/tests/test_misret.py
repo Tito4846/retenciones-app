@@ -19,11 +19,12 @@ FORMULARIO = """<html><body>
 <form name="formulario" action="consultaMisRetenciones.do" method="post"
       onsubmit="if (!this.fechaRetencionDesde.value) { alert('Debe ingresar la fecha desde'); return false; }">
   <input type="hidden" name="method" value="lookup">
-  <select id="cuitRetenido" name="cuitRetenido">
+  <select id="cuitRetenido" name="cuitRetenido" onchange="obtenerDenominacion(this.value)">
     <option value="">Seleccione una CUIT...</option>
     <option value="20235102162">20235102162</option>
     <option value="30710809883">30710809883</option>
   </select>
+  <div id="denominacionDiv"></div>
   <input id="cuitAgente" name="cuitAgente" type="text" maxlength="11">
   <input name="impuesto" type="text" maxlength="4">
   <select id="impuestos" onchange="formulario.impuesto.value = this.value; setRetencionPercepcion(this.value)">
@@ -40,6 +41,14 @@ FORMULARIO = """<html><body>
   <input class="inputbutton" type="submit" value="Consultar">
 </form>
 <script>
+  // Como ARCA: contesta el nombre un rato despues de elegir la CUIT.
+  var NOMBRES = {'20235102162': 'PEREZ JUAN', '30710809883': 'PICCININI Y ASOCIADOS S.A.'};
+  function obtenerDenominacion(cuit) {
+    setTimeout(function () {
+      document.getElementById('denominacionDiv').textContent = NOMBRES[cuit] || '';
+    }, 60);
+  }
+
   // Como ARCA: con el 767 se puede elegir Retencion o Percepcion; con el 217,
   // solo el combinado; con el 216, solo Retencion (y ARCA la deja marcada).
   function setRetencionPercepcion(impuesto) {
@@ -140,6 +149,7 @@ def test_lee_las_opciones_del_formulario(pestana, servidor):
     pestana.goto(servidor)
     formulario = misret.leer_formulario(pestana)
     assert formulario["cuits"] == ["20235102162", "30710809883"]
+    assert formulario["denominaciones"] == {"20235102162": "PEREZ JUAN", "30710809883": "PICCININI Y ASOCIADOS S.A."}
     assert formulario["impuestos"][0] == {
         "codigo": "217",
         "descripcion": "217 - SICORE-IMPTO.A LAS GANANCIAS",
@@ -241,3 +251,17 @@ def test_sin_detectados_van_ganancias_e_iva():
     assert misret.impuestos_a_consultar(OPCIONES) == ["217", "767"]
     # Un impuesto del mayor que ARCA no tiene (IIBB es provincial) no deja la consulta vacia.
     assert misret.impuestos_a_consultar(OPCIONES, {"Ingresos Brutos"}) == ["217", "767"]
+
+
+def test_si_arca_no_nombra_una_cuit_no_se_inventa(pestana, servidor, monkeypatch):
+    monkeypatch.setattr(misret, "ESPERA_NOMBRE_MS", 300)
+    pestana.goto(servidor)
+    pestana.evaluate("() => { delete NOMBRES['30710809883']; }")
+    assert misret.leer_formulario(pestana)["denominaciones"] == {"20235102162": "PEREZ JUAN"}
+
+
+def test_sin_el_recuadro_del_nombre_el_formulario_sigue_sirviendo(pestana, servidor):
+    pestana.goto(servidor)
+    pestana.evaluate("() => document.getElementById('denominacionDiv').remove()")
+    formulario = misret.leer_formulario(pestana)
+    assert formulario["denominaciones"] == {} and formulario["cuits"] == ["20235102162", "30710809883"]

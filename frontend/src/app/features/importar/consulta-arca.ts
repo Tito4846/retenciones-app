@@ -1,9 +1,10 @@
 import { Component, computed, effect, inject, linkedSignal, signal } from '@angular/core';
-import { Router, RouterLink } from '@angular/router';
+import { RouterLink } from '@angular/router';
 import { environment } from '../../../environments/environment';
 import { PasoAutomatico } from '../../core/models/conciliacion.models';
 import { ConsultaArca as Consulta, ImpuestoArca, TipoRetencion } from '../../core/models/conexiones.models';
 import { ConciliacionStore } from '../../core/services/conciliacion.store';
+import { LotesStore } from '../../core/services/lotes.store';
 import { CuitPipe } from '../../core/cuit.pipe';
 import { ConexionesStore } from '../../core/services/conexiones.store';
 import { NOMBRES_CORTOS, SUGERIDOS, SelectorImpuestos } from './selector-impuestos';
@@ -93,7 +94,7 @@ const PASOS: { id: PasoAutomatico; titulo: string; ayuda: string }[] = [
 export class ConsultaArca {
   protected readonly conexiones = inject(ConexionesStore);
   protected readonly store = inject(ConciliacionStore);
-  private readonly router = inject(Router);
+  private readonly lotes = inject(LotesStore);
 
   protected readonly formulario = computed(() => this.conexiones.arca()?.formulario ?? null);
   protected readonly arcaConectado = computed(() => this.conexiones.arca()?.estado === 'conectado');
@@ -152,6 +153,14 @@ export class ConsultaArca {
     },
   });
   protected readonly cuitAgente = signal('');
+
+  /** Por nombre, para encontrar la empresa; las que ARCA no nombró quedan al final. */
+  protected readonly contribuyentes = computed(() => {
+    const nombres = this.formulario()?.denominaciones ?? {};
+    return (this.formulario()?.cuits ?? [])
+      .map((cuit) => ({ cuit, nombre: nombres[cuit] ?? '' }))
+      .sort((a, b) => Number(!a.nombre) - Number(!b.nombre) || a.nombre.localeCompare(b.nombre, 'es'));
+  });
 
   /** La empresa con la que se entró a Xubio en Conexiones: de ella sale el Libro Mayor. */
   protected readonly empresaXubio = computed(() => this.conexiones.xubio()?.empresa_activa ?? null);
@@ -216,8 +225,10 @@ export class ConsultaArca {
 
   constructor() {
     effect(() => {
-      if (this.esperandoResultado() && this.store.fase() === 'completado') {
-        this.router.navigate(['/conciliacion']);
+      const taskId = this.store.taskId();
+      if (this.esperandoResultado() && this.store.fase() === 'completado' && taskId) {
+        this.esperandoResultado.set(false);
+        this.lotes.aVerificacion(taskId);
       }
     });
   }

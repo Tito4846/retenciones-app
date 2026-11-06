@@ -59,18 +59,18 @@
           <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-700 text-sm font-bold text-white">1</span>
           <div>
             <p class="font-semibold">Contribuyente</p>
-            <p class="text-sm text-muted">CUIT del retenido</p>
+            <p class="text-sm text-muted">Empresa del retenido</p>
           </div>
         </div>
-        <div class="flex flex-wrap items-center gap-3">
+        <div class="flex min-w-0 flex-wrap items-center gap-3">
           <select
-            aria-label="CUIT del retenido"
+            aria-label="Contribuyente"
             [value]="cuitRetenido()"
             (change)="cuitRetenido.set($any($event.target).value)"
-            class="rounded-lg border-2 border-brand-300 bg-white px-3 py-2 font-mono text-base font-semibold text-brand-800 focus:border-brand-500 focus:outline-none"
+            class="max-w-full rounded-lg border-2 border-brand-300 bg-white px-3 py-2 text-base font-semibold text-brand-800 focus:border-brand-500 focus:outline-none"
           >
-            @for (cuit of f.cuits; track cuit) {
-              <option [value]="cuit" [selected]="cuit === cuitRetenido()">{{ cuit | cuit }}</option>
+            @for (c of contribuyentes(); track c.cuit) {
+              <option [value]="c.cuit" [selected]="c.cuit === cuitRetenido()">{{ c.nombre ? c.nombre + ' · ' : '' }}{{ c.cuit | cuit }}</option>
             }
           </select>
           <span class="text-sm text-muted">
@@ -80,11 +80,13 @@
               La única CUIT que tu usuario de ARCA puede consultar.
             }
           </span>
+          <p class="w-full text-sm">
+            <span class="text-muted">CUIT elegida:</span>&ngsp;<span class="font-mono font-semibold">{{ cuitRetenido() | cuit }}</span>
+          </p>
           <!-- El Libro Mayor sale de la empresa con la que se entró a Xubio en Conexiones -->
           @if (xubioConectado()) {
-            <p class="w-full text-sm">
-              <span class="text-muted">Libro Mayor de Xubio:</span>
-              <span class="font-semibold">{{ empresaXubio() ?? 'la empresa con la que entraste en Conexiones' }}</span>
+            <p class="-mt-2 w-full text-sm">
+              <span class="text-muted">Libro Mayor de Xubio:</span>&ngsp;<span class="font-semibold">{{ empresaXubio() ?? 'la empresa con la que entraste en Conexiones' }}</span>
             </p>
           }
         </div>

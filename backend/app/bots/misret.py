@@ -6,6 +6,7 @@ Los nombres de los campos salen del HTML real capturado el 2026-11-02:
 
     form[name=formulario] (POST consultaMisRetenciones.do, method=lookup)
       select#cuitRetenido            CUIT del retenido (las del usuario)
+      div#denominacionDiv            su nombre, lo completa ARCA al elegirla
       input#cuitAgente               CUIT del agente (opcional)
       input[name=impuesto]           codigo del impuesto (texto)
       select#impuestos               el mismo impuesto, en combo
@@ -40,6 +41,7 @@ logger = logging.getLogger(__name__)
 
 SEL_FORM = "form[name=formulario]"
 SEL_CUIT_RETENIDO = "#cuitRetenido"
+SEL_DENOMINACION = "#denominacionDiv"
 SEL_CUIT_AGENTE = "#cuitAgente"
 SEL_IMPUESTO_TEXTO = "input[name=impuesto]"
 SEL_IMPUESTOS = "#impuestos"
@@ -58,6 +60,8 @@ TEXTOS_SIGUIENTE = ("Siguiente", "Próxima", "Próximo", ">")
 MAX_PAGINAS = 100
 # Mensajes de "no hay nada" en la pagina de resultados.
 SIN_RESULTADOS = ("no se encontraron", "no existen", "no hay retenciones", "sin resultados", "nothing found")
+# Cuanto se espera a que ARCA conteste el nombre de una CUIT.
+ESPERA_NOMBRE_MS = 4000
 
 
 class ErrorConsulta(RuntimeError):
@@ -86,7 +90,7 @@ class ConsultaArca:
 
 
 def leer_formulario(pestana: Any) -> dict:
-    """Las opciones del formulario real: CUITs del retenido e impuestos."""
+    """Las opciones del formulario real: CUITs del retenido, sus nombres e impuestos."""
 
     def opciones(selector: str) -> list[dict]:
         return pestana.locator(selector).locator("option").evaluate_all(
@@ -103,7 +107,29 @@ def leer_formulario(pestana: Any) -> dict:
     for impuesto in impuestos:
         # Vacio = no se pudo saber: la pantalla ofrece los tres.
         impuesto["tipos"] = tipos.get(impuesto["codigo"], [])
-    return {"cuits": cuits, "impuestos": impuestos}
+    return {"cuits": cuits, "denominaciones": _denominaciones(pestana, cuits), "impuestos": impuestos}
+
+
+def _denominaciones(pestana: Any, cuits: list[str]) -> dict[str, str]:
+    """
+    {cuit: nombre}, eligiendo cada CUIT en el combo: ARCA solo dice el nombre de
+    la elegida. Se vacia el recuadro antes de cada una para no leer el nombre
+    de la anterior, y si una no contesta se corta: una respuesta atrasada
+    dejaria un nombre en la CUIT equivocada. Sin nombre, la pantalla muestra la
+    CUIT sola.
+    """
+    nombres: dict[str, str] = {}
+    try:
+        for cuit in cuits:
+            pestana.evaluate("sel => { document.querySelector(sel).textContent = ''; }", SEL_DENOMINACION)
+            pestana.select_option(SEL_CUIT_RETENIDO, value=cuit)
+            espera = pestana.wait_for_function(
+                "sel => document.querySelector(sel).textContent.trim()", arg=SEL_DENOMINACION, timeout=ESPERA_NOMBRE_MS
+            )
+            nombres[cuit] = espera.json_value()
+    except Exception as error:  # noqa: BLE001 - sin nombres el formulario sigue sirviendo
+        logger.warning("ARCA no dio el nombre de todas las CUIT (%d de %d): %s", len(nombres), len(cuits), error)
+    return nombres
 
 
 # Elige cada impuesto en el combo (dispara el onchange de ARCA, que muestra u

@@ -9,8 +9,8 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { Router } from '@angular/router';
 import { ConciliacionStore } from '../../core/services/conciliacion.store';
+import { LotesStore } from '../../core/services/lotes.store';
 import { ConexionesStore } from '../../core/services/conexiones.store';
 import { ConsultaArca } from './consulta-arca';
 
@@ -32,7 +32,7 @@ interface ZonaCarga {
 export class Importar {
   protected readonly store = inject(ConciliacionStore);
   protected readonly conexiones = inject(ConexionesStore);
-  private readonly router = inject(Router);
+  private readonly lotes = inject(LotesStore);
 
   /** Cómo se arma una conciliación: un mes, una empresa y un impuesto, de los dos lados. */
   protected readonly pasos = [
@@ -69,10 +69,12 @@ export class Importar {
     const destroyRef = inject(DestroyRef);
     afterNextRender(() => this.conexiones.seguir(destroyRef));
 
-    // Al terminar el cruce, llevar al usuario a ver los resultados.
+    // Al terminar el cruce, el lote se arma solo y se abre en Verificación.
     effect(() => {
-      if (this.esperandoResultado() && this.store.fase() === 'completado') {
-        this.router.navigate(['/conciliacion']);
+      const taskId = this.store.taskId();
+      if (this.esperandoResultado() && this.store.fase() === 'completado' && taskId) {
+        this.esperandoResultado.set(false);
+        this.lotes.aVerificacion(taskId);
       }
     });
   }

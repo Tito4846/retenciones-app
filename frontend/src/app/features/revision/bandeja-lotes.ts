@@ -73,7 +73,7 @@ const PESTANAS: { id: Bandeja; titulo: string }[] = [
           } @else if (store.lotes().length) {
             No hay lotes acá.
           } @else {
-            Todavía no hay lotes. En <a routerLink="/conciliacion" class="font-semibold text-brand-700 underline">Conciliación</a>, tocá «Generar Lote para Revisión».
+            Todavía no hay lotes. Se arman solos al terminar una conciliación en <a routerLink="/importar" class="font-semibold text-brand-700 underline">Importar</a>.
           }
         </li>
       }

@@ -138,10 +138,10 @@ los motivos y marca en rojo las filas responsables en el detalle.
 
 El diseño completo está en [docs/diseno-revision.md](docs/diseno-revision.md). En resumen:
 
-- Desde **Conciliación**, el empleado toca «Generar Lote para Revisión» y confirma (cliente, CUIT y período salen del cruce; con archivos subidos a mano se escribe solo lo que falta): se genera la v1 del lote con
+- Al terminar el cruce, el lote se arma solo y se abre en **Verificación**; si no quedó nada para resolver, va directo al supervisor. Con archivos subidos a mano, que no dicen de qué cliente son, se genera desde **Conciliación** con «Generar Lote para Revisión». Se crea la v1 del lote con
   cada partida clasificada (Conciliado Automático, Diferencia de Monto, Pendiente de Comprobante,
   No Localizado en ERP / en Fisco) y un código de discrepancia. El Excel suma las hojas
-  `CONCILIACION` (protegida: solo se editan Justificación, Comentario, Importe ajustado y Excluida) y `_META` (oculta).
+  `RESUMEN` (la vista general), `CONCILIACION` (lo que falta va arriba; protegida: solo se editan Justificación, Comentario, Importe ajustado y Excluida) y `_META` (oculta).
 - **Revisión** es una bandeja: los lotes a la izquierda y, a la derecha, el lote con sus totales y su
   gestor de archivos. El trabajo se hace en Excel: se baja, se completa cada excepción y se sube; si está
   mal, la pantalla dice qué fila corregir. Los comprobantes se arrastran a la caja global y viajan con el

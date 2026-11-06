@@ -97,6 +97,15 @@ def crear(usuario: UsuarioActual, datos: NuevoLote) -> dict:
     return lotes.crear(usuario, tareas.obtener(datos.task_id), datos.empresa, datos.cuit_empresa, datos.periodo, datos.comentario)
 
 
+class DesdeCruce(BaseModel):
+    task_id: str
+
+
+@router.post("/lotes/desde-cruce", status_code=201)
+def desde_cruce(usuario: UsuarioActual, datos: DesdeCruce) -> dict:
+    return lotes.desde_cruce(usuario, tareas.obtener(datos.task_id))
+
+
 @router.get("/lotes/{lote_id}")
 def detalle(_: UsuarioActual, lote_id: str) -> dict:
     return lotes.detalle(lote_id)

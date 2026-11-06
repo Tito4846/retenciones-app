@@ -1,9 +1,10 @@
 """
 Las hojas del lote dentro del papel de trabajo:
 
-* CONCILIACION — una fila por partida con su estado y código. Protegida: solo
-  Justificación, Comentario, Importe ajustado y Excluida quedan para escribir.
-  Totales al pie con fórmulas.
+* RESUMEN      — la vista general: totales, cuánto concilió solo y qué falta resolver.
+* CONCILIACION — una fila por partida con su estado y código, primero las que
+  hay que mirar. Protegida: solo Justificación, Comentario, Importe ajustado y
+  Excluida quedan para escribir. Totales al pie con fórmulas.
 * _META        — muy oculta: lote, versión base y el hash de cada fila, para
   reconocer el archivo cuando vuelve subido.
 
@@ -23,6 +24,7 @@ from app.services import partidas as P
 
 HOJA = "CONCILIACION"
 HOJA_META = "_META"
+HOJA_RESUMEN = "RESUMEN"
 FORMATO = "lote-v1"
 
 # (encabezado, campo, ancho)
@@ -72,12 +74,59 @@ def _valor(campo: str, partida: dict):
     return valor or None
 
 
+def _escribir_resumen(libro: Workbook, partidas: list[dict], meta: dict) -> None:
+    """La primera hoja que se ve: se lee sola, sin recorrer la conciliación."""
+    hoja = libro.create_sheet(HOJA_RESUMEN, 0)
+    negrita = Font(bold=True)
+    gris = PatternFill("solid", fgColor="FFD9D9D9")
+    for columna, ancho in zip("ABCDE", (30, 34, 14, 18, 52), strict=True):
+        hoja.column_dimensions[columna].width = ancho
+
+    def fila(*valores, titulo: bool = False) -> None:
+        hoja.append(list(valores))
+        for celda in hoja[hoja.max_row]:
+            if titulo:
+                celda.font, celda.fill = negrita, gris
+            if isinstance(celda.value, float):
+                celda.number_format = "#,##0.00"
+
+    pendientes = [p for p in partidas if p["estado"] != P.CONCILIADO and not p.get("excluida")]
+    netos = P.totales_netos(partidas)
+    por_estado = P.resumen(partidas)["por_estado"]
+    hoja.append([f"{meta.get('empresa', '')} · {meta.get('periodo', '')} · versión {meta.get('version', '')}"])
+    hoja["A1"].font = Font(bold=True, size=14)
+    hoja.append(["Conciliaron solas todas las partidas." if not pendientes else
+                 f"Conciliaron solas {len(partidas) - len(pendientes)} de {len(partidas)} partidas. "
+                 f"Quedan {len(pendientes)} para resolver en la hoja {HOJA}."])
+    hoja.append([])
+    fila("Totales", "Importe", titulo=True)
+    fila("Informado en ARCA", float(netos["declarado"]))
+    fila("Registrado en el Mayor", float(netos["sistema"]))
+    fila("Diferencia", float(netos["neta"]))
+    hoja.cell(row=hoja.max_row, column=1).font = negrita
+    hoja.cell(row=hoja.max_row, column=2).font = negrita
+    hoja.append([])
+    fila("Estado", "Partidas", titulo=True)
+    for estado, cantidad in por_estado.items():
+        fila(estado, cantidad)
+    if pendientes:
+        hoja.append([])
+        fila("Para resolver", "Razón social", "Impuesto", "Diferencia", "Por qué", titulo=True)
+        for p in pendientes:
+            fila(p["estado"], p["razon_social"] or None, p["impuesto"] or None, float(p["diferencia"]), P.CODIGOS.get(p["codigo"]))
+    hoja.protection.sheet = True
+    hoja.protection.password = CLAVE_PROTECCION
+
+
 def _escribir_hojas(libro: Workbook, partidas: list[dict], meta: dict) -> None:
-    for nombre in (HOJA, HOJA_META):
+    for nombre in (HOJA, HOJA_META, HOJA_RESUMEN):
         if nombre in libro.sheetnames:
             del libro[nombre]
     hoja = libro.create_sheet(HOJA, 0)
+    _escribir_resumen(libro, partidas, meta)
     libro.active = 0
+    # Lo que hay que mirar va arriba; sorted conserva el orden dentro de cada grupo.
+    partidas = sorted(partidas, key=lambda p: p["estado"] == P.CONCILIADO)
     negrita = Font(bold=True)
     for col, (titulo, _, ancho) in enumerate(COLUMNAS, start=1):
         celda = hoja.cell(row=1, column=col, value=titulo)

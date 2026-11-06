@@ -699,6 +699,7 @@ class NavegadorArca:
         except Exception:  # noqa: BLE001 - ARCA a veces deja pedidos abiertos
             pass
         capturar_paginas(contexto, self._debug, "arca_servicio")
+        self._fijar(estado, "Leyendo las CUIT y sus nombres…")
         self._leer_formulario(pestana)
         return pestana
 

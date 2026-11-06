@@ -1,5 +1,6 @@
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Injectable, WritableSignal, computed, effect, inject, signal } from '@angular/core';
+import { Router } from '@angular/router';
 import { Observable, catchError, finalize, map, of, tap } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import {
@@ -21,6 +22,7 @@ export class LotesStore {
   private readonly http = inject(HttpClient);
   private readonly sesion = inject(SesionService);
   private readonly conciliacionService = inject(ConciliacionService);
+  private readonly router = inject(Router);
   private readonly api = `${environment.apiUrl}/lotes`;
 
   readonly lotes = signal<LoteListado[]>([]);
@@ -31,6 +33,8 @@ export class LotesStore {
   readonly ocupado = signal(false);
   /** El último error de una acción, con el detalle por fila si vino. */
   readonly error = signal<ErrorApi | null>(null);
+  /** Por qué el lote no se armó solo al terminar el cruce. */
+  readonly errorCruce = signal<ErrorApi | null>(null);
   /** El rechazo del Excel subido: se muestra junto a los botones del Excel, no arriba de todo. */
   readonly errorExcel = signal<ErrorApi | null>(null);
 
@@ -114,6 +118,25 @@ export class LotesStore {
         return of(null);
       }),
     );
+  }
+
+  /**
+   * Termina el cruce: el lote se arma solo y se abre en Verificación. Si no se pudo
+   * (archivos sin cliente, lote ya en revisión), se muestra el motivo en Conciliación.
+   */
+  aVerificacion(taskId: string): void {
+    this.errorCruce.set(null);
+    this.http.post<DetalleLote>(`${this.api}/desde-cruce`, { task_id: taskId }).subscribe({
+      next: (d) => {
+        this.detalle.set(d);
+        this.cargar();
+        this.router.navigate(['/revision'], { queryParams: { lote: d.lote.id } });
+      },
+      error: (e) => {
+        this.errorCruce.set(this.leerError(e, 'No se pudo generar el lote.'));
+        this.router.navigate(['/conciliacion']);
+      },
+    });
   }
 
   regenerar(loteId: string, taskId: string, versionBase: number): Observable<boolean> {

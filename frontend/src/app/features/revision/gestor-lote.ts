@@ -3,12 +3,13 @@ import { Component, ElementRef, computed, inject, input, model, viewChild } from
 import { DetalleLote } from '../../core/models/lote.models';
 import { LotesStore } from '../../core/services/lotes.store';
 import { EvidenciaLote } from './evidencia-lote';
-import { ORIGEN_VERSION } from './revision.util';
+import { ExcepcionesLote } from './excepciones-lote';
+import { CONCILIADO, ORIGEN_VERSION } from './revision.util';
 
 /** El trabajo del lote: se baja el Excel, se completa afuera, se sube y se adjuntan los comprobantes. */
 @Component({
   selector: 'app-gestor-lote',
-  imports: [DatePipe, EvidenciaLote],
+  imports: [DatePipe, EvidenciaLote, ExcepcionesLote],
   host: { class: 'block space-y-4' },
   template: `
     @let det = detalle();
@@ -32,6 +33,18 @@ import { ORIGEN_VERSION } from './revision.util';
           </label>
         }
       </div>
+      <p class="mt-3 text-sm font-semibold" [class]="porResolver() ? 'text-amber-800' : 'text-emerald-700'">
+        @if (porResolver().length; as n) {
+          Conciliaron solas {{ conciliadas() }} de {{ det.partidas.length }} partidas. {{ n === 1 ? 'Queda 1' : 'Quedan ' + n }} para resolver en el Excel.
+        } @else if (conciliadas() === det.partidas.length) {
+          Conciliaron solas todas las partidas.
+        } @else {
+          Conciliaron solas {{ conciliadas() }} de {{ det.partidas.length }} partidas. Las demás ya están resueltas.
+        }
+      </p>
+      @if (porResolver().length) {
+        <app-excepciones-lote [partidas]="porResolver()" [editar]="editar()" />
+      }
       @if (vigente(); as v) {
         <p class="mt-2 text-xs text-muted">
           Versión vigente: {{ v.numero }} · {{ origen() }} · {{ v.autor_nombre }} · {{ v.creado_utc | date: 'dd/MM HH:mm' }}
@@ -39,7 +52,7 @@ import { ORIGEN_VERSION } from './revision.util';
       }
       @if (editar()) {
         <p class="mt-1 text-xs text-muted">
-          En la hoja CONCILIACION completá Justificación y Comentario. Para llevar la diferencia a cero usá Importe ajustado, o poné Sí en Excluida contando el motivo.
+          En la hoja RESUMEN está la vista general. En CONCILIACION, lo que falta va arriba: completá Justificación y Comentario. Para llevar la diferencia a cero usá Importe ajustado, o poné Sí en Excluida contando el motivo.
         </p>
       }
 
@@ -102,6 +115,10 @@ export class GestorLote {
     const v = this.vigente();
     return v?.correccion_checker ? 'Corrección del supervisor' : (ORIGEN_VERSION[v?.origen ?? ''] ?? v?.origen);
   });
+
+  protected readonly conciliadas = computed(() => this.detalle().partidas.filter((p) => p.estado === CONCILIADO).length);
+  /** El mismo criterio que traba el envío: lo que todavía tiene algo sin completar. */
+  protected readonly porResolver = computed(() => this.detalle().partidas.filter((p) => p.estado !== CONCILIADO && !p.excluida && p.faltas.length));
 
   protected descargar(): void {
     const v = this.vigente();

@@ -21,6 +21,8 @@ export interface ImpuestoArca {
 /** Opciones del formulario de Mis Retenciones, leídas por el bot en ARCA. */
 export interface FormularioArca {
   cuits: string[];
+  /** CUIT → nombre, como lo dice ARCA. Puede faltar alguna. */
+  denominaciones?: Record<string, string>;
   impuestos: ImpuestoArca[];
 }
 

@@ -7,7 +7,9 @@ import pytest
 
 from app.core import db
 from app.core.config import settings
-from app.services import excel_lote, lotes
+from app.services import excel_lote, lotes, tareas
+from app.services import partidas as P
+from tests.conftest import ARCA_CSV
 from tests.test_api import _subir, cliente
 
 ANA = {"X-Usuario-Id": "ana", "X-Usuario-Nombre": "Ana", "X-Usuario-Roles": "empleado"}
@@ -61,10 +63,11 @@ def test_partidas_con_estado_y_excel_con_hojas_del_lote(ruta_arca, ruta_mayor):
     lote = _lote(ruta_arca, ruta_mayor)
     assert lote["lote"]["estado"] == "borrador" and lote["lote"]["version_vigente"] == 1
     estados = sorted((p["estado"], p["codigo"]) for p in lote["partidas"])
-    # BANCO: par por certificado pero a 12 días (P03); PEREZ: por razón social, sin certificado (P01);
+    # PEREZ: mismo agente e importe, aunque el asiento no traiga el certificado: conciliado.
+    # BANCO: par por certificado pero a 12 días (P03);
     # PROVEEDOR: dos sin registrar (N01); el asiento de IVA de 1.500: no está en ARCA (N02).
-    assert estados == [("No Localizado en ERP", "N01"), ("No Localizado en ERP", "N01"), ("No Localizado en Fisco", "N02"),
-                       ("Pendiente de Comprobante", "P01"), ("Pendiente de Comprobante", "P03")]
+    assert estados == [("Conciliado Automático", ""), ("No Localizado en ERP", "N01"), ("No Localizado en ERP", "N01"),
+                       ("No Localizado en Fisco", "N02"), ("Pendiente de Comprobante", "P03")]
     # El cuadre al centavo contra las fuentes da.
     assert lote["versiones"][0]["validacion"]["valida"]
     assert not [e for e in lote["compuertas"]["enviar"] if e["codigo"].startswith("CUADRE")]
@@ -73,7 +76,14 @@ def test_partidas_con_estado_y_excel_con_hojas_del_lote(ruta_arca, ruta_mayor):
 
     excel = cliente.get(f"/api/lotes/{lote['lote']['id']}/versiones/1/excel", headers=ANA)
     libro = openpyxl.load_workbook(io.BytesIO(excel.content))
-    assert libro.sheetnames == ["CONCILIACION", "ARCA", "LIBRO MAYOR", "_META"]
+    assert libro.sheetnames == ["RESUMEN", "CONCILIACION", "ARCA", "LIBRO MAYOR", "_META"]
+    assert libro.active.title == "RESUMEN"
+    resumen = [c.value for fila in libro["RESUMEN"].iter_rows() for c in fila if c.value is not None]
+    assert "Conciliaron solas 1 de 5 partidas. Quedan 4 para resolver en la hoja CONCILIACION." in resumen
+    assert "JUAN PEREZ" not in resumen and "BANCO EJEMPLO SA" in resumen
+    # Lo que hay que mirar queda arriba de lo que concilió solo.
+    estados_excel = [libro["CONCILIACION"][f"B{f}"].value for f in range(2, 7)]
+    assert estados_excel[-1] == "Conciliado Automático" and "Conciliado Automático" not in estados_excel[:-1]
     assert libro["_META"].sheet_state == "veryHidden" and libro["CONCILIACION"].protection.sheet
     assert [c.value for c in libro["CONCILIACION"][1]] == excel_lote.ENCABEZADOS
 
@@ -385,7 +395,7 @@ def test_el_excel_del_lote_muestra_ajustes_y_exclusiones(ruta_arca, ruta_mayor):
     lote = _lote(ruta_arca, ruta_mayor)
     lote_id = lote["lote"]["id"]
     base = f"/api/lotes/{lote_id}"
-    primera, segunda = lote["partidas"][0]["clave"], lote["partidas"][1]["clave"]
+    primera, segunda = [p["clave"] for p in lote["partidas"] if p["estado"] != "Conciliado Automático"][:2]
     cliente.patch(f"{base}/partidas/{primera}", json={"version": 1, "importe_ajustado": "10.50"}, headers=ANA)
     cliente.patch(f"{base}/partidas/{segunda}", json={"version": 1, "excluida": True, "comentario": "Duplicada"}, headers=ANA)
     libro = _bajar(lote_id, 1)
@@ -607,3 +617,64 @@ def test_el_supervisor_sube_un_excel_corregido_sin_devolver(ruta_arca, ruta_mayo
     assert lote["versiones"][0]["correccion_checker"] == 1
     r = cliente.post(base + "/aprobar", data={"version": 2}, headers=LUIS)
     assert r.status_code == 200 and r.json()["lote"]["estado"] == "aprobado"
+
+
+def _cruce_con_cliente(ruta_arca, ruta_mayor, empresa="Piccinini", cuit="30-71111111-1") -> str:
+    task_id = _subir(ruta_arca, ruta_mayor).json()["task_id"]
+    tareas.obtener(task_id).resultado["resumen"].update(empresa=empresa, cuit_empresa=cuit)
+    return task_id
+
+
+def _desde_cruce(task_id: str):
+    return cliente.post("/api/lotes/desde-cruce", json={"task_id": task_id}, headers=ANA)
+
+
+def test_el_cruce_arma_el_lote_y_lo_deja_con_lo_que_falta(ruta_arca, ruta_mayor):
+    r = _desde_cruce(_cruce_con_cliente(ruta_arca, ruta_mayor))
+    assert r.status_code == 201, r.text
+    lote = r.json()["lote"]
+    assert (lote["estado"], lote["empresa"], lote["periodo"], lote["version_vigente"]) == ("borrador", "Piccinini", "2026-10", 1)
+
+
+def test_repetir_el_cruce_no_duplica_ni_suma_versiones(ruta_arca, ruta_mayor):
+    primero = _desde_cruce(_cruce_con_cliente(ruta_arca, ruta_mayor)).json()["lote"]
+    segundo = _desde_cruce(_cruce_con_cliente(ruta_arca, ruta_mayor)).json()["lote"]
+    assert segundo["id"] == primero["id"] and segundo["version_vigente"] == 1
+
+
+def test_si_cuadra_todo_va_directo_al_supervisor(tmp_path, ruta_mayor):
+    lineas = ARCA_CSV.splitlines()
+    arca = tmp_path / "solo_perez.csv"
+    arca.write_text("\n".join([*lineas[:2], lineas[3]]) + "\n", encoding="cp1252")
+    libro = openpyxl.load_workbook(ruta_mayor)
+    hoja = libro.active
+    for fila in reversed(range(5, hoja.max_row + 1)):
+        if "rez" not in str(hoja[f"G{fila}"].value):
+            hoja.delete_rows(fila)
+    mayor = tmp_path / "solo_perez.xlsx"
+    libro.save(mayor)
+    r = _desde_cruce(_cruce_con_cliente(str(arca), str(mayor)))
+    assert r.status_code == 201, r.text
+    detalle = r.json()
+    assert detalle["lote"]["estado"] == "pendiente"
+    assert all(p["estado"] == "Conciliado Automático" for p in detalle["partidas"])
+
+
+def test_sin_cliente_no_se_arma_solo(ruta_arca, ruta_mayor):
+    r = _desde_cruce(_cruce_con_cliente(ruta_arca, ruta_mayor, "", ""))
+    assert r.status_code == 422 and r.json()["detail"]["codigo"] == "SIN_IDENTIDAD"
+
+
+def test_un_lote_en_verificacion_no_se_pisa_con_otro_cruce(ruta_arca, ruta_mayor):
+    lote = _desde_cruce(_cruce_con_cliente(ruta_arca, ruta_mayor)).json()
+    lote = _justificar_todo(lote)
+    r = cliente.post(f"/api/lotes/{lote['lote']['id']}/enviar", data={"version": lote["lote"]["version_vigente"]}, headers=ANA)
+    assert r.status_code == 200, r.text
+    r = _desde_cruce(_cruce_con_cliente(ruta_arca, ruta_mayor))
+    assert r.status_code == 409 and r.json()["detail"]["codigo"] == "LOTE_REPETIDO"
+
+
+def test_solo_importe_y_fecha_sigue_pidiendo_revision():
+    par = {"criterio": "importe_fecha", "diferencia_importe": 0, "diferencia_dias": 1}
+    assert P._estado_par(par, {"cuit": ""}, {"cuit": ""}, 7) == (P.PENDIENTE, "P01")
+    assert P._estado_par({**par, "criterio": "razon_social"}, {"cuit": ""}, {"cuit": ""}, 7) == (P.CONCILIADO, "")
