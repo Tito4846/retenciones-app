@@ -224,6 +224,9 @@ export interface Catalogo {
   controles: Record<string, string>;
   exportaciones: Record<string, string>;
   adjuntos_permitidos: string[];
+  /** Comprobantes que viajan con la confirmación del lote. */
+  evidencia_permitida: string[];
+  evidencia_max_mb: number;
   motivo_minimo: number;
 }
 

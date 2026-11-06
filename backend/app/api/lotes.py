@@ -12,6 +12,11 @@ from app.services import auditoria, lotes, tareas
 
 router = APIRouter(tags=["lotes"])
 UsuarioActual = Annotated[Usuario, Depends(usuario_actual)]
+Evidencia = Annotated[list[UploadFile], File()]
+
+
+async def _leer(evidencia: list[UploadFile]) -> list[tuple[str, bytes]]:
+    return [(a.filename or "comprobante", await a.read()) for a in evidencia]
 
 
 class NuevoLote(BaseModel):
@@ -29,10 +34,6 @@ class Rectificacion(BaseModel):
 
 class ConVersion(BaseModel):
     version: int
-
-
-class Envio(ConVersion):
-    comentario: str = ""
 
 
 class Regeneracion(BaseModel):
@@ -169,8 +170,9 @@ def retirar_adjunto(usuario: UsuarioActual, lote_id: str, adjunto_id: str) -> di
 
 
 @router.post("/lotes/{lote_id}/enviar")
-def enviar(usuario: UsuarioActual, lote_id: str, datos: Envio) -> dict:
-    return lotes.enviar(usuario, lote_id, datos.version, datos.comentario)
+async def enviar(usuario: UsuarioActual, lote_id: str, version: Annotated[int, Form()],
+                 comentario: Annotated[str, Form()] = "", evidencia: Evidencia = []) -> dict:  # noqa: B006
+    return lotes.enviar(usuario, lote_id, version, comentario, await _leer(evidencia))
 
 
 @router.post("/lotes/{lote_id}/tomar")
@@ -199,8 +201,8 @@ def rechazar(usuario: UsuarioActual, lote_id: str, datos: Rechazo) -> dict:
 
 
 @router.post("/lotes/{lote_id}/aprobar")
-def aprobar(usuario: UsuarioActual, lote_id: str, datos: ConVersion) -> dict:
-    return lotes.aprobar(usuario, lote_id, datos.version)
+async def aprobar(usuario: UsuarioActual, lote_id: str, version: Annotated[int, Form()], evidencia: Evidencia = []) -> dict:  # noqa: B006
+    return lotes.aprobar(usuario, lote_id, version, await _leer(evidencia))
 
 
 @router.post("/lotes/{lote_id}/anular")

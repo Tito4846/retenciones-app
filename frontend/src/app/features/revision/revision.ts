@@ -44,6 +44,8 @@ export class RevisionPantalla {
   protected readonly soloPendientes = linkedSignal({ source: this.loteId, computation: () => false });
   /** Importes a medio escribir, por partida: mueven el marcador antes de guardarse. */
   private readonly borradores = linkedSignal<string | null, Record<string, string | null>>({ source: this.loteId, computation: () => ({}) });
+  /** Comprobantes a la espera de confirmar: acá sobreviven al cambio de pestaña. */
+  protected readonly evidencia = linkedSignal<string | null, File[]>({ source: this.loteId, computation: () => [] });
 
   protected readonly permisos = computed<Permisos>(() => {
     const lote = this.d()?.lote;

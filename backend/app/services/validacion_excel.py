@@ -126,9 +126,7 @@ def validar(contenido: bytes, lote: dict, base: dict, partidas_base: list[dict])
             break
         if fila and fila[0]:
             meta[str(fila[0])] = fila[1]
-    encabezados = [c.value for c in hoja[1]][: len(X.ENCABEZADOS)]
-    if encabezados != X.ENCABEZADOS:
-        r.error(1, "ENCABEZADOS", "Las columnas de la hoja CONCILIACION no son las originales (no se agregan, quitan ni mueven columnas).", hoja=X.HOJA, fila=1)
+    _revisar_encabezados(r, [c.value for c in hoja[1]][: len(X.ENCABEZADOS)])
     if meta.get("formato") != X.FORMATO:
         r.error(1, "FORMATO", "El archivo no tiene el formato de un lote.", hoja=X.HOJA_META)
     if meta.get("lote_id") != lote["id"]:
@@ -154,26 +152,30 @@ def validar(contenido: bytes, lote: dict, base: dict, partidas_base: list[dict])
     # 2) Sintaxis por fila
     for numero, f in leidas:
         if f["estado"] not in P.ESTADOS:
-            r.error(2, "ESTADO_INVALIDO", f"Estado desconocido: «{f['estado']}».", hoja=X.HOJA, fila=numero, columna="Estado")
+            r.error(2, "ESTADO_INVALIDO", f"{_formato('Estado', numero)} tiene un estado desconocido («{f['estado']}»).", hoja=X.HOJA, fila=numero, columna="Estado")
         if f["codigo"] and f["codigo"] not in P.CODIGOS:
-            r.error(2, "CODIGO_INVALIDO", f"Código desconocido: «{f['codigo']}».", hoja=X.HOJA, fila=numero, columna="Código")
+            r.error(2, "CODIGO_INVALIDO", f"{_formato('Código', numero)} tiene un código desconocido («{f['codigo']}»).", hoja=X.HOJA, fila=numero, columna="Código")
         if f["justificacion"] and f["justificacion"] not in P.JUSTIFICACIONES:
-            r.error(2, "JUSTIFICACION_INVALIDA", f"«{f['justificacion']}» no está en la lista de justificaciones.", hoja=X.HOJA, fila=numero, columna="Justificación")
+            r.error(2, "JUSTIFICACION_INVALIDA", f"{_formato('Justificación', numero)} dice «{f['justificacion']}», que no está en la lista.", hoja=X.HOJA, fila=numero, columna="Justificación")
         if f["cuit"] and not P.cuit_valida(f["cuit"]):
             r.aviso(2, "CUIT_INVALIDA", f"La CUIT {f['cuit']} tiene el dígito verificador mal.", hoja=X.HOJA, fila=numero, columna="CUIT")
         for campo in X.COLUMNAS_FECHA:
             valor = f[campo]
             if valor and len(valor) != 10:
-                r.error(2, "FECHA_INVALIDA", f"«{valor}» no es una fecha.", hoja=X.HOJA, fila=numero, columna=_titulo(campo))
+                r.error(2, "FECHA_INVALIDA", f"{_formato(_titulo(campo), numero)} no tiene una fecha válida («{valor}»).", hoja=X.HOJA, fila=numero, columna=_titulo(campo))
         for campo in X.COLUMNAS_IMPORTE:
             valor = f[campo]
+            if valor is None:
+                continue
+            problema = f"contiene letras («{valor}»)" if X.tiene_letras(valor) else None
             try:
-                if valor is not None:
-                    Decimal(valor)
+                Decimal(valor)
             except InvalidOperation:
-                r.error(2, "IMPORTE_INVALIDO", f"«{valor}» no es un importe.", hoja=X.HOJA, fila=numero, columna=_titulo(campo))
+                problema = problema or f"no tiene un importe válido («{valor}»)"
+            if problema:
+                r.error(2, "IMPORTE_INVALIDO", f"{_formato(_titulo(campo), numero)} {problema}.", hoja=X.HOJA, fila=numero, columna=_titulo(campo))
         if len(f["comentario"] or "") > 2000:
-            r.error(2, "COMENTARIO_LARGO", "El comentario supera los 2000 caracteres.", hoja=X.HOJA, fila=numero, columna="Comentario")
+            r.error(2, "COMENTARIO_LARGO", f"{_formato('Comentario', numero)} supera los 2000 caracteres.", hoja=X.HOJA, fila=numero, columna="Comentario")
     if r.corte(2):
         return r, []
 
@@ -183,17 +185,18 @@ def validar(contenido: bytes, lote: dict, base: dict, partidas_base: list[dict])
     for numero, f in leidas:
         clave = f["clave"]
         if clave in vistas:
-            r.error(3, "DUPLICADA", f"La fila repite la partida de la fila {vistas[clave]}.", hoja=X.HOJA, fila=numero, columna="Clave")
+            r.error(3, "DUPLICADA", f"La fila {numero} repite la partida de la fila {vistas[clave]}.", hoja=X.HOJA, fila=numero, columna="Clave")
             continue
         vistas[clave] = numero
         original = por_clave.get(clave)
         if original is None:
-            r.error(3, "FILA_AGREGADA", "Fila que no está en el lote: las partidas se agregan re-conciliando, no a mano.", hoja=X.HOJA, fila=numero)
+            r.error(3, "FILA_AGREGADA", f"La fila {numero} no está en el lote original: las partidas se agregan volviendo a conciliar, no a mano.", hoja=X.HOJA, fila=numero)
             continue
         if P.hash_fila(f) != original["hash_fila"]:
             for _, campo, _ in X.COLUMNAS:
                 if campo in P.CAMPOS_BLOQUEADOS and (f[campo] or "") != (original[campo] or ""):
-                    r.error(3, "COLUMNA_ALTERADA", f"Se modificó una columna bloqueada ({_titulo(campo)}).", hoja=X.HOJA,
+                    r.error(3, "COLUMNA_ALTERADA", f"Se modificó la columna bloqueada «{_titulo(campo)}» en la fila {numero}: "
+                            f"decía «{original[campo] or 'vacío'}» y ahora dice «{f[campo] or 'vacío'}».", hoja=X.HOJA,
                             fila=numero, columna=_titulo(campo), esperado=original[campo], encontrado=f[campo])
     for clave, original in por_clave.items():
         if clave not in vistas:
@@ -206,7 +209,7 @@ def validar(contenido: bytes, lote: dict, base: dict, partidas_base: list[dict])
     for fila in hoja.iter_rows():
         for celda in fila:
             if celda.data_type == "f" and celda.coordinate not in permitidas:
-                r.error(3, "FORMULA", "Hay una fórmula fuera de los totales: cargá valores.", hoja=X.HOJA, fila=celda.row, columna=celda.column_letter)
+                r.error(3, "FORMULA", f"La celda {celda.coordinate} tiene una fórmula: cargá el valor directamente.", hoja=X.HOJA, fila=celda.row, columna=celda.column_letter)
     if r.corte(3):
         return r, []
 
@@ -228,6 +231,24 @@ def validar(contenido: bytes, lote: dict, base: dict, partidas_base: list[dict])
                  "cambiadas": sum(1 for p in nuevas if (p["justificacion"], p["comentario"]) != (
                      por_clave[p["clave"]]["justificacion"], por_clave[p["clave"]]["comentario"]))}
     return r, nuevas if not r.errores else []
+
+
+def _formato(columna: str, fila: int) -> str:
+    return f"Error de formato: la columna «{columna}» en la fila {fila}"
+
+
+def _revisar_encabezados(r: Resultado, encontrados: list) -> None:
+    """Dice qué columna se tocó: «no son las originales» no le sirve a nadie para arreglarlo."""
+    if encontrados == X.ENCABEZADOS:
+        return
+    faltan = [t for t in X.ENCABEZADOS if t not in encontrados]
+    sobran = [t for t in encontrados if t is not None and t not in X.ENCABEZADOS]
+    for titulo in faltan:
+        r.error(1, "ENCABEZADOS", f"Se eliminó la columna original «{titulo}».", hoja=X.HOJA, columna=titulo)
+    for titulo in sobran:
+        r.error(1, "ENCABEZADOS", f"Se agregó la columna «{titulo}», que no es del archivo original.", hoja=X.HOJA, columna=str(titulo))
+    if not faltan and not sobran:
+        r.error(1, "ENCABEZADOS", "Se cambió el orden de las columnas: dejalas como en el archivo original.", hoja=X.HOJA)
 
 
 def _titulo(campo: str) -> str:

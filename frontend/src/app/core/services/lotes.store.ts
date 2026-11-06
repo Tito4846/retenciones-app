@@ -1,5 +1,5 @@
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
-import { Injectable, computed, effect, inject, signal } from '@angular/core';
+import { Injectable, WritableSignal, computed, effect, inject, signal } from '@angular/core';
 import { Observable, catchError, finalize, map, of, tap } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import {
@@ -40,6 +40,8 @@ export class LotesStore {
   readonly ocupado = signal(false);
   /** El último error de una acción, con el detalle por fila si vino. */
   readonly error = signal<ErrorApi | null>(null);
+  /** El rechazo del Excel subido: se muestra junto a los botones del Excel, no arriba de todo. */
+  readonly errorExcel = signal<ErrorApi | null>(null);
 
   /** Lo que espera algo de quien está usando el módulo (contador del menú). */
   readonly paraMi = computed(() => {
@@ -97,7 +99,10 @@ export class LotesStore {
       this.detalle.set(null);
       return;
     }
-    if (this.detalle()?.lote.id !== id) this.detalle.set(null);
+    if (this.detalle()?.lote.id !== id) {
+      this.detalle.set(null);
+      this.errorExcel.set(null);
+    }
     this.http.get<DetalleLote>(`${this.api}/${id}`).subscribe({
       next: (d) => this.detalle.set(d),
       error: (e) => this.error.set(this.leerError(e, 'No se pudo abrir el lote.')),
@@ -128,7 +133,7 @@ export class LotesStore {
     const datos = new FormData();
     datos.append('archivo', archivo);
     datos.append('version_base', String(versionBase));
-    return this.accion(this.http.post<DetalleLote>(`${this.api}/${loteId}/versiones`, datos));
+    return this.accion(this.http.post<DetalleLote>(`${this.api}/${loteId}/versiones`, datos), this.errorExcel);
   }
 
   actualizarPartida(loteId: string, clave: string, version: number, cambios: CambioPartida): Observable<boolean> {
@@ -146,8 +151,10 @@ export class LotesStore {
     return this.accion(this.http.delete<DetalleLote>(`${this.api}/${loteId}/adjuntos/${adjuntoId}`));
   }
 
-  enviar(loteId: string, version: number, comentario: string): Observable<boolean> {
-    return this.accion(this.http.post<DetalleLote>(`${this.api}/${loteId}/enviar`, { version, comentario }));
+  enviar(loteId: string, version: number, comentario: string, evidencia: File[] = []): Observable<boolean> {
+    const datos = this.conEvidencia(version, evidencia);
+    datos.append('comentario', comentario);
+    return this.accion(this.http.post<DetalleLote>(`${this.api}/${loteId}/enviar`, datos));
   }
 
   tomar(loteId: string): Observable<boolean> {
@@ -170,8 +177,8 @@ export class LotesStore {
     return this.accion(this.http.post<DetalleLote>(`${this.api}/${loteId}/rechazar`, { version, motivo, observaciones: [] }));
   }
 
-  aprobar(loteId: string, version: number): Observable<boolean> {
-    return this.accion(this.http.post<DetalleLote>(`${this.api}/${loteId}/aprobar`, { version }));
+  aprobar(loteId: string, version: number, evidencia: File[] = []): Observable<boolean> {
+    return this.accion(this.http.post<DetalleLote>(`${this.api}/${loteId}/aprobar`, this.conEvidencia(version, evidencia)));
   }
 
   anular(loteId: string, motivo: string): Observable<boolean> {
@@ -216,9 +223,16 @@ export class LotesStore {
     });
   }
 
-  private accion(pedido: Observable<DetalleLote>): Observable<boolean> {
+  private conEvidencia(version: number, evidencia: File[]): FormData {
+    const datos = new FormData();
+    datos.append('version', String(version));
+    for (const archivo of evidencia) datos.append('evidencia', archivo);
+    return datos;
+  }
+
+  private accion(pedido: Observable<DetalleLote>, error: WritableSignal<ErrorApi | null> = this.error): Observable<boolean> {
     this.ocupado.set(true);
-    this.error.set(null);
+    error.set(null);
     return pedido.pipe(
       map((d) => {
         this.detalle.set(d);
@@ -227,7 +241,7 @@ export class LotesStore {
         return true;
       }),
       catchError((e: unknown) => {
-        this.error.set(this.leerError(e, 'No se pudo guardar. Revisá que el backend esté corriendo.'));
+        error.set(this.leerError(e, 'No se pudo guardar. Revisá que el backend esté corriendo.'));
         return of(false);
       }),
       finalize(() => this.ocupado.set(false)),

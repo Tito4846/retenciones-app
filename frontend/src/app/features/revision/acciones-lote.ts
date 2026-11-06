@@ -1,4 +1,4 @@
-import { Component, computed, inject, input, linkedSignal } from '@angular/core';
+import { Component, computed, inject, input, linkedSignal, model } from '@angular/core';
 import { DetalleLote, Observacion } from '../../core/models/lote.models';
 import { LotesStore } from '../../core/services/lotes.store';
 import { Permisos, pesos } from './revision.util';
@@ -18,6 +18,7 @@ const SIN_AUTOAPROBACION = 'No podés aprobar un lote que vos mismo preparaste';
           <p class="text-sm text-emerald-900">
             Vas a aprobar la versión {{ lote.version_vigente }} de <strong>{{ lote.empresa }}</strong>.
             Queda cerrada: no se va a poder editar ni borrar nada, y se habilita la exportación para la DDJJ.
+            @if (evidencia().length; as n) { Se {{ n === 1 ? 'adjunta 1 comprobante' : 'adjuntan ' + n + ' comprobantes' }} al cierre. }
           </p>
         } @else {
           <label class="block text-sm">
@@ -55,6 +56,11 @@ const SIN_AUTOAPROBACION = 'No podés aprobar un lote que vos mismo preparaste';
         </p>
       }
     } @else {
+      @if (p.editar && evidencia().length) {
+        <p class="mb-2 text-xs text-muted">
+          {{ evidencia().length === 1 ? '1 comprobante espera' : evidencia().length + ' comprobantes esperan' }} la confirmación: se {{ evidencia().length === 1 ? 'adjunta' : 'adjuntan' }} al {{ p.revisar ? 'aprobar' : 'enviar' }}.
+        </p>
+      }
       @if (p.editar && !p.revisar) {
         <input type="text" [value]="nota()" (input)="nota.set($any($event.target).value)" aria-label="Nota para quien revisa"
           placeholder="Nota para quien revisa (opcional)"
@@ -104,6 +110,8 @@ export class AccionesLote {
   readonly trabasEnviar = input.required<string[]>();
   readonly trabasAprobar = input.required<string[]>();
   readonly observacionesAbiertas = input<Observacion[]>([]);
+  /** Se manda con la confirmación y se vacía solo si salió bien. */
+  readonly evidencia = model<File[]>([]);
 
   private readonly loteId = computed(() => this.detalle().lote.id);
   protected readonly confirmar = linkedSignal<string, 'rechazar' | 'anular' | 'aprobar' | null>({ source: this.loteId, computation: () => null });
@@ -137,7 +145,11 @@ export class AccionesLote {
 
   protected enviar(): void {
     const { id, version_vigente } = this.detalle().lote;
-    this.store.enviar(id, version_vigente, this.nota()).subscribe((ok) => ok && this.nota.set(''));
+    this.store.enviar(id, version_vigente, this.nota(), this.evidencia()).subscribe((ok) => {
+      if (!ok) return;
+      this.nota.set('');
+      this.evidencia.set([]);
+    });
   }
 
   /** «Devolver»: el motivo arranca con las observaciones abiertas, para no escribir dos veces lo mismo. */
@@ -157,6 +169,11 @@ export class AccionesLote {
     const fin = (ok: boolean) => ok && (this.confirmar.set(null), this.motivo.set(''));
     if (tipo === 'rechazar') this.store.rechazar(id, version_vigente, this.motivo()).subscribe(fin);
     if (tipo === 'anular') this.store.anular(id, this.motivo()).subscribe(fin);
-    if (tipo === 'aprobar') this.store.aprobar(id, version_vigente).subscribe(fin);
+    if (tipo === 'aprobar') {
+      this.store.aprobar(id, version_vigente, this.evidencia()).subscribe((ok) => {
+        if (ok) this.evidencia.set([]);
+        fin(ok);
+      });
+    }
   }
 }

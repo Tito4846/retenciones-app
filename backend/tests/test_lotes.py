@@ -7,7 +7,7 @@ import pytest
 
 from app.core import db
 from app.core.config import settings
-from app.services import excel_lote
+from app.services import excel_lote, lotes
 from tests.test_api import _subir, cliente
 
 ANA = {"X-Usuario-Id": "ana", "X-Usuario-Nombre": "Ana", "X-Usuario-Roles": "empleado"}
@@ -85,12 +85,12 @@ def test_ciclo_completo_maker_checker(ruta_arca, ruta_mayor):
 
     # Un empleado no revisa.
     assert cliente.post(base + "/tomar", headers=ANA).status_code == 403
-    assert cliente.post(base + "/enviar", json={"version": 1}, headers=ANA).json()["detail"]["codigo"] == "COMPUERTA"
+    assert cliente.post(base + "/enviar", data={"version": 1}, headers=ANA).json()["detail"]["codigo"] == "COMPUERTA"
 
     lote = _justificar_todo(lote)
     assert lote["lote"]["version_vigente"] == 1  # borrador: se corrige en el lugar
     assert lote["compuertas"]["enviar"] == []
-    lote = cliente.post(base + "/enviar", json={"version": 1}, headers=ANA).json()
+    lote = cliente.post(base + "/enviar", data={"version": 1}, headers=ANA).json()
     assert lote["lote"]["estado"] == "pendiente" and lote["versiones"][0]["sellada_utc"]
 
     # Mientras espera, la empleada no puede tocar nada.
@@ -116,19 +116,19 @@ def test_ciclo_completo_maker_checker(ruta_arca, ruta_mayor):
     assert cambios == [{"clave": clave, "razon_social": lote["partidas"][0]["razon_social"],
                         "cambios": [{"campo": "comentario", "antes": "Ver respaldo", "despues": "Corregido con la NC 12"}]}]
 
-    lote = cliente.post(base + "/enviar", json={"version": 2}, headers=ANA).json()
+    lote = cliente.post(base + "/enviar", data={"version": 2}, headers=ANA).json()
     cliente.post(base + "/tomar", headers=LUIS)
 
     # Para aprobar: controles tildados y observaciones resueltas.
-    r = cliente.post(base + "/aprobar", json={"version": 2}, headers=LUIS)
+    r = cliente.post(base + "/aprobar", data={"version": 2}, headers=LUIS)
     assert r.status_code == 409 and {e["codigo"] for e in r.json()["detail"]["errores"]} == {"CONTROLES", "OBSERVACIONES"}
     for control in cliente.get("/api/lotes/catalogo").json()["controles"]:
         cliente.put(f"{base}/controles/{control}", json={"version": 2, "ok": True}, headers=LUIS)
     obs = lote["observaciones"][0]["id"]
     cliente.patch(f"{base}/observaciones/{obs}", json={"resuelta": True}, headers=LUIS)
     # Versión vieja: no se aprueba algo distinto de lo que se vio.
-    assert cliente.post(base + "/aprobar", json={"version": 1}, headers=LUIS).json()["detail"]["codigo"] == "VERSION_VIEJA"
-    lote = cliente.post(base + "/aprobar", json={"version": 2}, headers=LUIS).json()
+    assert cliente.post(base + "/aprobar", data={"version": 1}, headers=LUIS).json()["detail"]["codigo"] == "VERSION_VIEJA"
+    lote = cliente.post(base + "/aprobar", data={"version": 2}, headers=LUIS).json()
     assert lote["lote"]["estado"] == "aprobado" and lote["lote"]["hash_aprobado"]
 
     # Aprobado = inmutable: ni la API ni la base dejan tocarlo.
@@ -160,7 +160,7 @@ def test_ciclo_completo_maker_checker(ruta_arca, ruta_mayor):
 def test_segregacion_de_funciones(ruta_arca, ruta_mayor):
     lote = _justificar_todo(_lote(ruta_arca, ruta_mayor, EVA), EVA)
     base = f"/api/lotes/{lote['lote']['id']}"
-    cliente.post(base + "/enviar", json={"version": 1}, headers=EVA)
+    cliente.post(base + "/enviar", data={"version": 1}, headers=EVA)
     r = cliente.post(base + "/tomar", headers=EVA)
     assert r.status_code == 403 and r.json()["detail"]["codigo"] == "SOD"
     acciones = [e["action_type"] for e in cliente.get(base + "/auditoria", headers=EVA).json()["eventos"]]
@@ -259,7 +259,7 @@ def test_supervisor_se_pasa_un_lote_tomado_por_otro(ruta_arca, ruta_mayor):
     jefa = {"X-Usuario-Id": "jefa", "X-Usuario-Nombre": "Jefa", "X-Usuario-Roles": "supervisor"}
     lote = _justificar_todo(_lote(ruta_arca, ruta_mayor))
     base = f"/api/lotes/{lote['lote']['id']}"
-    cliente.post(base + "/enviar", json={"version": 1}, headers=ANA)
+    cliente.post(base + "/enviar", data={"version": 1}, headers=ANA)
     assert cliente.post(base + "/tomar", headers=LUIS).status_code == 200
     # Un empleado no puede tomar ni quedarse con nada.
     assert cliente.post(base + "/tomar", headers=ANA).status_code == 403
@@ -285,7 +285,7 @@ def test_justificar_en_borrador_no_deja_archivos_sueltos(ruta_arca, ruta_mayor):
 def _en_revision(ruta_arca, ruta_mayor) -> tuple[dict, str]:
     lote = _justificar_todo(_lote(ruta_arca, ruta_mayor))
     base = f"/api/lotes/{lote['lote']['id']}"
-    assert cliente.post(base + "/enviar", json={"version": 1}, headers=ANA).status_code == 200
+    assert cliente.post(base + "/enviar", data={"version": 1}, headers=ANA).status_code == 200
     r = cliente.post(base + "/tomar", headers=LUIS)
     assert r.status_code == 200, r.text
     return r.json(), base
@@ -306,7 +306,7 @@ def test_la_diferencia_neta_bloquea_y_se_actualiza_con_el_ajuste(ruta_arca, ruta
     lote = cliente.patch(f"{base}/partidas/{p['clave']}", json={"version": 1, "importe_ajustado": None}, headers=ANA).json()
     assert lote["totales"]["neta"] == p["importe_fisco"]
     assert [e["codigo"] for e in lote["compuertas"]["enviar"]] == ["DIFERENCIA_NETA"]
-    assert cliente.post(base + "/enviar", json={"version": 1}, headers=ANA).json()["detail"]["codigo"] == "COMPUERTA"
+    assert cliente.post(base + "/enviar", data={"version": 1}, headers=ANA).json()["detail"]["codigo"] == "COMPUERTA"
 
     for malo in ("abc", "-5", "NaN", "Infinity"):
         r = cliente.patch(f"{base}/partidas/{p['clave']}", json={"version": 1, "importe_ajustado": malo}, headers=ANA)
@@ -367,7 +367,7 @@ def test_el_supervisor_corrige_sin_devolver_y_aprueba(ruta_arca, ruta_mayor):
 
     for control in cliente.get("/api/lotes/catalogo").json()["controles"]:
         cliente.put(f"{base}/controles/{control}", json={"version": 2, "ok": True}, headers=LUIS)
-    r = cliente.post(base + "/aprobar", json={"version": 2}, headers=LUIS)
+    r = cliente.post(base + "/aprobar", data={"version": 2}, headers=LUIS)
     assert r.status_code == 200, r.text
     lote = r.json()
     assert lote["lote"]["estado"] == "aprobado" and lote["versiones"][0]["sellada_utc"]
@@ -379,7 +379,7 @@ def test_lo_que_corrige_el_supervisor_tambien_pasa_por_las_compuertas(ruta_arca,
     lote = cliente.patch(f"{base}/partidas/{p['clave']}", json={"version": 1, "importe_ajustado": "1.00"}, headers=LUIS).json()
     for control in cliente.get("/api/lotes/catalogo").json()["controles"]:
         cliente.put(f"{base}/controles/{control}", json={"version": 2, "ok": True}, headers=LUIS)
-    r = cliente.post(base + "/aprobar", json={"version": 2}, headers=LUIS)
+    r = cliente.post(base + "/aprobar", data={"version": 2}, headers=LUIS)
     assert r.status_code == 409 and [e["codigo"] for e in r.json()["detail"]["errores"]] == ["DIFERENCIA_NETA"]
 
     # Al devolverlo, la versión queda sellada y lo que sigue es de quien prepara.
@@ -430,3 +430,90 @@ def test_quitar_una_fila_baja_el_contador_de_excepciones(ruta_arca, ruta_mayor):
                       json={"version": lote["lote"]["version_vigente"], "excluida": True, "comentario": "Es de otro período"}, headers=ANA)
     assert r.status_code == 200, r.text
     assert cliente.get("/api/lotes", headers=ANA).json()["lotes"][0]["resumen"]["excepciones"] == antes - 1
+
+
+# --- Errores del Excel y evidencia -----------------------------------------
+
+
+def test_letras_en_un_importe_se_informan_con_columna_y_fila(ruta_arca, ruta_mayor):
+    lote_id = _lote(ruta_arca, ruta_mayor)["lote"]["id"]
+    libro = _bajar(lote_id, 1)
+    libro["CONCILIACION"]["M2"] = "12a4"
+    r = _subir_version(lote_id, libro, 1)
+    assert r.status_code == 422
+    detalle = r.json()["detail"]
+    assert detalle["errores"][0]["codigo"] == "IMPORTE_INVALIDO"
+    assert detalle["errores"][0]["mensaje"] == "Error de formato: la columna «Importe Fisco» en la fila 2 contiene letras («12a4»)."
+    assert "etapa" not in detalle["mensaje"]
+
+
+def test_columna_eliminada_se_nombra(ruta_arca, ruta_mayor):
+    lote_id = _lote(ruta_arca, ruta_mayor)["lote"]["id"]
+    libro = _bajar(lote_id, 1)
+    libro["CONCILIACION"].delete_cols(9)  # Certificado
+    errores = _subir_version(lote_id, libro, 1).json()["detail"]["errores"]
+    assert [e["mensaje"] for e in errores] == ["Se eliminó la columna original «Certificado»."]
+
+
+def test_cuit_modificada_dice_que_cambio(ruta_arca, ruta_mayor):
+    lote_id = _lote(ruta_arca, ruta_mayor)["lote"]["id"]
+    libro = _bajar(lote_id, 1)
+    libro["CONCILIACION"]["F2"] = "20-99999999-9"
+    error = _subir_version(lote_id, libro, 1).json()["detail"]["errores"][0]
+    assert error["codigo"] == "COLUMNA_ALTERADA" and error["columna"] == "CUIT"
+    assert "en la fila 2" in error["mensaje"] and "20-99999999-9" in error["mensaje"]
+
+
+def _listo_para_aprobar(ruta_arca, ruta_mayor) -> str:
+    _, base = _en_revision(ruta_arca, ruta_mayor)
+    for control in cliente.get("/api/lotes/catalogo").json()["controles"]:
+        assert cliente.put(f"{base}/controles/{control}", json={"version": 1, "ok": True}, headers=LUIS).status_code == 200
+    return base
+
+
+def _pdf(nombre: str = "comprobante.pdf", cuerpo: bytes = b"%PDF-1.4 evidencia") -> tuple:
+    return ("evidencia", (nombre, cuerpo, "application/pdf"))
+
+
+def test_la_evidencia_viaja_con_el_envio(ruta_arca, ruta_mayor):
+    lote = _justificar_todo(_lote(ruta_arca, ruta_mayor))
+    base = f"/api/lotes/{lote['lote']['id']}"
+    previos = len(lote["adjuntos"])
+    r = cliente.post(base + "/enviar", data={"version": 1, "comentario": "Va con NC"}, files=[_pdf(), _pdf("foto.jpg", b"\xff\xd8jpg")], headers=ANA)
+    assert r.status_code == 200, r.text
+    nuevos = r.json()["adjuntos"][previos:]
+    assert [(a["nombre"], a["clave_partida"], a["autor_nombre"]) for a in nuevos] == [("comprobante.pdf", None, "Ana"), ("foto.jpg", None, "Ana")]
+
+
+def test_la_evidencia_queda_dentro_del_sello_de_aprobacion(ruta_arca, ruta_mayor):
+    base = _listo_para_aprobar(ruta_arca, ruta_mayor)
+    r = cliente.post(base + "/aprobar", data={"version": 1}, files=[_pdf()], headers=LUIS)
+    assert r.status_code == 200, r.text
+    lote = r.json()
+    assert lote["lote"]["estado"] == "aprobado" and lote["adjuntos"][-1]["autor_nombre"] == "Luis"
+    with db.transaccion(escritura=False) as c:
+        fila = dict(c.execute("SELECT * FROM lote WHERE id = ?", (lote["lote"]["id"],)).fetchone())
+        assert lotes._hash_aprobado(c, fila, lotes._version_vigente(c, fila)) == lote["lote"]["hash_aprobado"]
+    eventos = cliente.get(f"{base}/auditoria", headers=LUIS).json()["eventos"]
+    subido = next(e for e in eventos if e["action_type"] == "adjunto_subido" and e["detalle"].get("origen") == "evidencia")
+    assert subido["user_nombre"] == "Luis" and subido["detalle"]["sha256"] == lote["adjuntos"][-1]["sha256"]
+
+
+def test_si_no_se_aprueba_no_queda_ninguna_evidencia(ruta_arca, ruta_mayor):
+    lote, base = _en_revision(ruta_arca, ruta_mayor)  # sin los controles tildados
+    previos = len(lote["adjuntos"])
+    r = cliente.post(base + "/aprobar", data={"version": 1}, files=[_pdf()], headers=LUIS)
+    assert r.status_code == 409 and r.json()["detail"]["codigo"] == "COMPUERTA"
+    assert len(cliente.get(base, headers=LUIS).json()["adjuntos"]) == previos
+
+
+@pytest.mark.parametrize(("nombre", "cuerpo", "estado", "codigo"), [
+    ("planilla.xlsx", b"PK", 422, "TIPO_NO_PERMITIDO"),
+    ("vacio.pdf", b"", 422, "VACIO"),
+    ("grande.pdf", b"x" * (5 * 1024 * 1024 + 1), 413, "ARCHIVO_GRANDE"),
+])
+def test_evidencia_invalida_frena_la_aprobacion(ruta_arca, ruta_mayor, nombre, cuerpo, estado, codigo):
+    base = _listo_para_aprobar(ruta_arca, ruta_mayor)
+    r = cliente.post(base + "/aprobar", data={"version": 1}, files=[_pdf(), _pdf(nombre, cuerpo)], headers=LUIS)
+    assert r.status_code == estado and r.json()["detail"]["codigo"] == codigo
+    assert cliente.get(base, headers=LUIS).json()["lote"]["estado"] == "en_revision"

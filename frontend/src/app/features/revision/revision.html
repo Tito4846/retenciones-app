@@ -147,7 +147,7 @@
             <app-controles-lote [detalle]="det" [revisar]="p.revisar" [editar]="p.editar" />
           }
           @case ('versiones') {
-            <app-versiones-lote [detalle]="det" [editar]="p.editar && !p.revisar" />
+            <app-versiones-lote [detalle]="det" [editar]="p.editar && !p.revisar" [revisar]="p.revisar" [(evidencia)]="evidencia" />
           }
           @case ('historial') {
             <app-historial-lote [loteId]="det.lote.id" [version]="det.lote.version_vigente" />
@@ -155,7 +155,7 @@
         }
       </div>
 
-      <app-acciones-lote [detalle]="det" [permisos]="p" [trabasEnviar]="trabasEnviar()" [trabasAprobar]="trabasAprobar()" [observacionesAbiertas]="observacionesAbiertas()" />
+      <app-acciones-lote [detalle]="det" [permisos]="p" [trabasEnviar]="trabasEnviar()" [trabasAprobar]="trabasAprobar()" [observacionesAbiertas]="observacionesAbiertas()" [(evidencia)]="evidencia" />
     </section>
   } @else {
     <section class="flex items-center justify-center rounded-2xl border border-dashed border-line p-10 text-center text-muted">

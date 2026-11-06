@@ -47,6 +47,12 @@ export function pesos(valor: string | number | null | undefined): string {
   return valor === null || valor === undefined || valor === '' ? '—' : PESOS.format(Number(valor));
 }
 
+/** El peso de un archivo para mostrar: «820 KB», «1,4 MB». */
+export function peso(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toLocaleString('es-AR', { maximumFractionDigits: 1 })} MB`;
+}
+
 export function periodo(p: string): string {
   const [anio, mes] = p.split('-');
   return mes && anio?.length === 4 ? `${mes}/${anio}` : p || 'Sin período';

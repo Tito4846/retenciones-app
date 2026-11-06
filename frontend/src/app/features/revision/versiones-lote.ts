@@ -1,8 +1,9 @@
 import { DatePipe } from '@angular/common';
-import { Component, computed, effect, inject, input, linkedSignal, signal } from '@angular/core';
+import { Component, computed, effect, inject, input, linkedSignal, model, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { DetalleLote, Diff, Version } from '../../core/models/lote.models';
 import { LotesStore } from '../../core/services/lotes.store';
+import { EvidenciaLote } from './evidencia-lote';
 import { pesos } from './revision.util';
 
 const ORIGEN_VERSION: Record<string, string> = {
@@ -20,7 +21,7 @@ const CAMPOS: Record<string, string> = {
 /** Las versiones del lote, el trabajo en Excel y qué cambió entre una versión y otra. */
 @Component({
   selector: 'app-versiones-lote',
-  imports: [DatePipe, RouterLink],
+  imports: [DatePipe, EvidenciaLote, RouterLink],
   host: { class: 'block' },
   template: `
     @let det = detalle();
@@ -38,6 +39,23 @@ const CAMPOS: Record<string, string> = {
             Bajá el Excel, completá Justificación y Comentario en la hoja CONCILIACION y subilo. Se valida antes de quedar como versión nueva:
             si alguien tocó importes, fechas u otras columnas bloqueadas, se rechaza y te dice qué fila.
           </p>
+          @if (store.errorExcel(); as e) {
+            <div role="alert" class="mt-3 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-red-900 transition duration-300 ease-out starting:-translate-y-1 starting:opacity-0 motion-reduce:transition-none">
+              <div class="flex items-start gap-2">
+                <p class="font-semibold">{{ e.mensaje }}</p>
+                <button type="button" (click)="store.errorExcel.set(null)" class="ml-auto text-red-700/70 hover:text-red-900" aria-label="Cerrar">✕</button>
+              </div>
+              @if (e.errores.length) {
+                <ul class="mt-1.5 max-h-40 list-disc space-y-0.5 overflow-y-auto pl-5">
+                  @for (x of e.errores; track $index) { <li>{{ x.mensaje }}</li> }
+                </ul>
+              }
+              @if (vigente(); as v) {
+                <button type="button" (click)="store.bajarVersion(det.lote.id, v.numero, v.nombre_archivo)"
+                  class="mt-2 text-xs font-semibold underline hover:text-red-700">Volver a descargar archivo base</button>
+              }
+            </div>
+          }
           <div class="mt-3 flex flex-wrap gap-2">
             @if (vigente(); as v) {
               <button type="button" (click)="store.bajarVersion(det.lote.id, v.numero, v.nombre_archivo)"
@@ -50,6 +68,9 @@ const CAMPOS: Record<string, string> = {
           </div>
         }
       </div>
+    }
+    @if ((editar() || revisar()) && det.partidas.length) {
+      <app-evidencia-lote class="mb-4" [revisar]="revisar()" [(archivos)]="evidencia" />
     }
     <ul class="space-y-2">
       @for (v of det.versiones; track v.id) {
@@ -115,6 +136,9 @@ export class VersionesLote {
 
   readonly detalle = input.required<DetalleLote>();
   readonly editar = input(false);
+  /** El supervisor no trabaja el Excel, pero puede sumar comprobantes al aprobar. */
+  readonly revisar = input(false);
+  readonly evidencia = model<File[]>([]);
 
   protected readonly vigente = computed(() => this.detalle().versiones.find((v) => v.numero === this.detalle().lote.version_vigente) ?? null);
   protected readonly desde = signal(1);

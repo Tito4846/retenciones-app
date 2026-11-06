@@ -137,12 +137,17 @@ def generar(base: bytes, partidas: list[dict], meta: dict) -> bytes:
     return salida.getvalue()
 
 
+def tiene_letras(valor) -> bool:
+    return isinstance(valor, str) and any(c.isalpha() for c in valor)
+
+
 def a_texto(campo: str, valor) -> str | None:
     """Una celda leída, en la forma en que se guarda la partida."""
     if valor is None or (isinstance(valor, str) and not valor.strip()):
         return None if campo in (*COLUMNAS_IMPORTE, *COLUMNAS_FECHA) else ""
     if campo in COLUMNAS_IMPORTE:
-        return P.importe(valor)
+        # Con letras queda tal cual para que la validación lo marque: dec() las volvería 0.00.
+        return str(valor).strip() if tiene_letras(valor) else P.importe(valor)
     if campo in COLUMNAS_FECHA:
         if isinstance(valor, datetime):
             return valor.date().isoformat()

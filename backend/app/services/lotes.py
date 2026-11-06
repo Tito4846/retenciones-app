@@ -56,6 +56,9 @@ EXPORTACIONES = {
 }
 
 ADJUNTOS_PERMITIDOS = {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".xlsx", ".xls", ".csv", ".txt"}
+# Comprobantes que viajan con la confirmación (enviar o aprobar) y quedan en el audit trail.
+EVIDENCIA_PERMITIDA = {".pdf", ".png", ".jpg", ".jpeg"}
+EVIDENCIA_MAX_MB = 5
 MOTIVO_MINIMO = 15
 TIPO_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
@@ -401,7 +404,8 @@ def subir_version(usuario: Usuario, lote_id: str, contenido: bytes, nombre: str,
         if resultado.errores:
             auditoria.registrar(c, usuario, "carga_rechazada", lote_id, base["id"], archivo=nombre, sha256=_sha(contenido),
                                 etapa=resultado.etapa_fallida, errores=resultado.errores[:50])
-            rechazo = ErrorDeLote(422, "VALIDACION", f"El archivo no pasó la validación (etapa {resultado.etapa_fallida}).",
+            n = len(resultado.errores)
+            rechazo = ErrorDeLote(422, "VALIDACION", f"No pudimos cargar el Excel: tiene {'1 problema' if n == 1 else f'{n} problemas'} para corregir.",
                                   resultado.errores, validacion=resultado.a_dict())
         else:
             numero = base["numero"] + 1
@@ -499,17 +503,46 @@ def actualizar_partida(usuario: Usuario, lote_id: str, clave: str, version: int,
 # ----------------------------------------------------------------------
 
 
-def subir_adjunto(usuario: Usuario, lote_id: str, contenido: bytes, nombre: str, clave_partida: str | None) -> dict:
-    _exigir_maker(usuario)
+def _revisar_adjunto(contenido: bytes, nombre: str, permitidos: set[str], max_mb: int) -> str:
+    """Devuelve el nombre limpio, o rechaza el archivo antes de tocar la base."""
     nombre = Path(nombre or "respaldo").name[:150]
     extension = Path(nombre).suffix.lower()
-    if extension not in ADJUNTOS_PERMITIDOS:
-        raise ErrorDeLote(422, "TIPO_NO_PERMITIDO", f"Tipo de archivo no permitido ({extension or 'sin extensión'}). "
-                          f"Se aceptan: {', '.join(sorted(ADJUNTOS_PERMITIDOS))}.")
+    if extension not in permitidos:
+        raise ErrorDeLote(422, "TIPO_NO_PERMITIDO", f"«{nombre}»: tipo de archivo no permitido ({extension or 'sin extensión'}). "
+                          f"Se aceptan: {', '.join(sorted(permitidos))}.")
     if not contenido:
-        raise ErrorDeLote(422, "VACIO", "El archivo está vacío.")
-    if len(contenido) > settings.MAX_MB_ARCHIVO * 1024 * 1024:
-        raise ErrorDeLote(413, "ARCHIVO_GRANDE", f"El archivo supera los {settings.MAX_MB_ARCHIVO} MB.")
+        raise ErrorDeLote(422, "VACIO", f"«{nombre}» está vacío.")
+    if len(contenido) > max_mb * 1024 * 1024:
+        raise ErrorDeLote(413, "ARCHIVO_GRANDE", f"«{nombre}» supera los {max_mb} MB.")
+    return nombre
+
+
+def _insertar_adjunto(c: sqlite3.Connection, usuario: Usuario, lote_id: str, version_id: str, contenido: bytes, nombre: str,
+                      clave_partida: str | None = None, **auditado) -> None:
+    adjunto = {
+        "id": uuid.uuid4().hex[:12], "lote_id": lote_id, "clave_partida": clave_partida or None, "version_id": version_id,
+        "nombre": nombre, "mime": mimetypes.guess_type(nombre)[0] or "application/octet-stream", "tamano": len(contenido),
+        "sha256": _guardar_archivo(contenido, Path(nombre).suffix.lower()), "autor_id": usuario.id, "autor_nombre": usuario.nombre,
+        "creado_utc": ahora_utc(),
+    }
+    c.execute(f"INSERT INTO adjunto ({', '.join(adjunto)}) VALUES ({', '.join('?' * len(adjunto))})", list(adjunto.values()))
+    auditoria.registrar(c, usuario, "adjunto_subido", lote_id, version_id, adjunto=adjunto["id"], nombre=nombre,
+                        sha256=adjunto["sha256"], clave_partida=clave_partida, **auditado)
+
+
+def _revisar_evidencia(evidencia: list[tuple[str, bytes]]) -> list[tuple[str, bytes]]:
+    return [(_revisar_adjunto(contenido, nombre, EVIDENCIA_PERMITIDA, EVIDENCIA_MAX_MB), contenido) for nombre, contenido in evidencia]
+
+
+def _guardar_evidencia(c: sqlite3.Connection, usuario: Usuario, lote_id: str, version_id: str, evidencia: list[tuple[str, bytes]]) -> None:
+    """Respaldos generales del lote: entran en la misma transacción que la confirmación, o no entra ninguno."""
+    for nombre, contenido in evidencia:
+        _insertar_adjunto(c, usuario, lote_id, version_id, contenido, nombre, origen="evidencia")
+
+
+def subir_adjunto(usuario: Usuario, lote_id: str, contenido: bytes, nombre: str, clave_partida: str | None) -> dict:
+    _exigir_maker(usuario)
+    nombre = _revisar_adjunto(contenido, nombre, ADJUNTOS_PERMITIDOS, settings.MAX_MB_ARCHIVO)
     with transaccion() as c:
         lote = _lote(c, lote_id)
         _exigir_edicion(lote, usuario)
@@ -517,15 +550,7 @@ def subir_adjunto(usuario: Usuario, lote_id: str, contenido: bytes, nombre: str,
         if clave_partida and not c.execute("SELECT 1 FROM partida WHERE version_id = ? AND clave = ?",
                                            (vigente["id"], clave_partida)).fetchone():
             raise ErrorDeLote(404, "NO_EXISTE", "La partida no existe en la versión vigente.")
-        adjunto = {
-            "id": uuid.uuid4().hex[:12], "lote_id": lote_id, "clave_partida": clave_partida or None, "version_id": vigente["id"],
-            "nombre": nombre, "mime": mimetypes.guess_type(nombre)[0] or "application/octet-stream", "tamano": len(contenido),
-            "sha256": _guardar_archivo(contenido, extension), "autor_id": usuario.id, "autor_nombre": usuario.nombre,
-            "creado_utc": ahora_utc(),
-        }
-        c.execute(f"INSERT INTO adjunto ({', '.join(adjunto)}) VALUES ({', '.join('?' * len(adjunto))})", list(adjunto.values()))
-        auditoria.registrar(c, usuario, "adjunto_subido", lote_id, vigente["id"], adjunto=adjunto["id"], nombre=nombre,
-                            sha256=adjunto["sha256"], clave_partida=clave_partida)
+        _insertar_adjunto(c, usuario, lote_id, vigente["id"], contenido, nombre, clave_partida)
         return _detalle(c, lote_id)
 
 
@@ -575,8 +600,10 @@ def _decision(c: sqlite3.Connection, lote: dict, version_id: str | None, tipo: s
               "VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (uuid.uuid4().hex[:12], lote["id"], version_id, tipo, motivo, usuario.id, usuario.nombre, ahora_utc()))
 
 
-def enviar(usuario: Usuario, lote_id: str, version: int, comentario: str = "") -> dict:
+def enviar(usuario: Usuario, lote_id: str, version: int, comentario: str = "",
+           evidencia: list[tuple[str, bytes]] | None = None) -> dict:
     _exigir_maker(usuario)
+    evidencia = _revisar_evidencia(evidencia or [])
     with transaccion() as c:
         lote = _lote(c, lote_id)
         _exigir_estado(lote, *EDITABLES)
@@ -585,6 +612,7 @@ def enviar(usuario: Usuario, lote_id: str, version: int, comentario: str = "") -
         if faltas:
             raise _conflicto("Todavía no se puede enviar a revisión.", "COMPUERTA", faltas)
         vigente = _version_vigente(c, lote)
+        _guardar_evidencia(c, usuario, lote_id, vigente["id"], evidencia)
         _sellar(c, vigente)
         _decision(c, lote, vigente["id"], "envio", comentario.strip(), usuario)
         c.execute("UPDATE lote SET estado = 'pendiente', checker_id = NULL, checker_nombre = NULL, actualizado_utc = ? WHERE id = ?",
@@ -705,7 +733,8 @@ def _hash_aprobado(c: sqlite3.Connection, lote: dict, version: dict) -> str:
     return hashlib.sha256("\n".join(partes).encode("utf-8")).hexdigest()
 
 
-def aprobar(usuario: Usuario, lote_id: str, version: int) -> dict:
+def aprobar(usuario: Usuario, lote_id: str, version: int, evidencia: list[tuple[str, bytes]] | None = None) -> dict:
+    evidencia = _revisar_evidencia(evidencia or [])
     with transaccion() as c:
         lote = _lote(c, lote_id)
         _exigir_estado(lote, "en_revision")
@@ -717,6 +746,8 @@ def aprobar(usuario: Usuario, lote_id: str, version: int) -> dict:
         if faltas:
             raise _conflicto("Todavía no se puede aprobar.", "COMPUERTA", faltas)
         vigente = _version_vigente(c, lote)
+        # Antes de calcular el sello: los comprobantes quedan dentro de hash_aprobado.
+        _guardar_evidencia(c, usuario, lote_id, vigente["id"], evidencia)
         _sellar(c, vigente)
         _decision(c, lote, vigente["id"], "aprobacion", "", usuario)
         _notificar(c, lote, "aprobado", f"{usuario.nombre} aprobó {lote['empresa']} {lote['periodo']} (v{vigente['numero']}).",
@@ -938,5 +969,6 @@ def catalogo() -> dict:
         "estados_partida": list(P.ESTADOS), "codigos": P.CODIGOS, "flags": P.FLAGS, "justificaciones": P.JUSTIFICACIONES,
         "justificaciones_con_respaldo": list(P.JUSTIFICACIONES_CON_RESPALDO), "codigos_con_respaldo": list(P.CODIGOS_CON_RESPALDO),
         "controles": CONTROLES, "exportaciones": {k: v[0] for k, v in EXPORTACIONES.items()},
-        "adjuntos_permitidos": sorted(ADJUNTOS_PERMITIDOS), "motivo_minimo": MOTIVO_MINIMO,
+        "adjuntos_permitidos": sorted(ADJUNTOS_PERMITIDOS), "evidencia_permitida": sorted(EVIDENCIA_PERMITIDA),
+        "evidencia_max_mb": EVIDENCIA_MAX_MB, "motivo_minimo": MOTIVO_MINIMO,
     }

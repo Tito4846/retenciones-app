@@ -282,11 +282,11 @@ vieja · `413` archivo grande · `422` validación del archivo o del payload.
 | POST | `/lotes` | empleado | `{task_id, empresa, cuit_empresa, periodo, comentario?}` | 201 lote (v1) |
 | GET | `/lotes?estado&periodo&empresa&asignado_a_mi` | todos | — | lista con resumen |
 | GET | `/lotes/{id}` | todos | — | lote + versión vigente + compuertas (qué falta) |
-| POST | `/lotes/{id}/enviar` | empleado (maker) | `{version, comentario?}` | lote `pendiente` |
+| POST | `/lotes/{id}/enviar` | empleado (maker) | multipart `version`, `comentario?`, `evidencia*` | lote `pendiente` |
 | POST | `/lotes/{id}/tomar` | supervisor | — | lote `en_revision` |
 | PUT | `/lotes/{id}/controles/{control}` | supervisor asignado | `{version, ok}` | lote |
 | POST | `/lotes/{id}/rechazar` | supervisor asignado | `{version, motivo, observaciones?: [{clave?, texto, origen}]}` | lote `rechazado` |
-| POST | `/lotes/{id}/aprobar` | supervisor asignado | `{version}` | lote `aprobado` |
+| POST | `/lotes/{id}/aprobar` | supervisor asignado | multipart `version`, `evidencia*` | lote `aprobado` |
 | POST | `/lotes/{id}/anular` | empleado / supervisor | `{motivo}` | lote `anulado` |
 | POST | `/lotes/{id}/rectificar` | empleado | `{task_id, motivo}` | 201 lote nuevo que rectifica al aprobado |
 
@@ -299,6 +299,11 @@ vieja · `413` archivo grande · `422` validación del archivo o del payload.
 | GET | `/lotes/{id}/versiones/{n}/excel` | todos | — | `.xlsx` (registra `descarga`) |
 | GET | `/lotes/{id}/versiones/{n}/validacion` | todos | — | resultado del pipeline |
 | GET | `/lotes/{id}/diff?desde=1&hasta=2` | todos | — | `{agregadas, quitadas, cambiadas: [{clave, campo, antes, despues}], totales}` |
+
+`evidencia` son comprobantes (`.pdf`, `.jpg`, `.png`, hasta 5 MB cada uno) que se
+guardan como respaldos generales en la misma transacción que la confirmación: si
+la compuerta falla no entra ninguno, y al aprobar quedan dentro de `hash_aprobado`.
+Cada uno deja su `adjunto_subido` en la auditoría con `origen = evidencia`.
 
 ### Partidas y adjuntos
 
