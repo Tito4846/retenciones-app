@@ -56,6 +56,7 @@ class Entrada:
     # De quién es la conciliación, si se sabe (los archivos subidos no lo dicen).
     empresa: str = ""
     cuit_empresa: str = ""
+    desde_periodo: date | None = None
 
 
 _tareas: dict[str, Tarea] = {}
@@ -146,6 +147,7 @@ def procesar_con(
     cargar: Callable[[], tuple[list[dict], LecturaMayor]],
     hasta_periodo: date | None = None,
     identidad: Callable[[], tuple[str, str]] | None = None,
+    desde_periodo: date | None = None,
 ) -> None:
     """
     Corre `cargar` (archivos subidos o bots de las conexiones), cruza y deja
@@ -160,7 +162,7 @@ def procesar_con(
             return
         avanzar(task_id, "cruce", "Cruzando las retenciones de ARCA con el Libro Mayor…")
         empresa, cuit_empresa = identidad() if identidad else ("", "")
-        entrada = Entrada(arca, mayor, hasta_periodo, empresa, formatear_cuit(cuit_empresa))
+        entrada = Entrada(arca, mayor, hasta_periodo, empresa, formatear_cuit(cuit_empresa), desde_periodo)
         _terminar(task_id, status="completado", entrada=entrada, resultado=_cruzar(entrada, {}))
     except OperacionCancelada:
         pass  # el estado ya dice «cancelado»
@@ -192,6 +194,7 @@ def _cruzar(entrada: Entrada, manuales: dict[int, int]) -> dict:
         empresa=entrada.empresa,
         cuit_empresa=entrada.cuit_empresa,
         periodo=_periodo(entrada),
+        desde_periodo=entrada.desde_periodo.isoformat() if entrada.desde_periodo else None,
         **partidas.marcar_exactos(resultado, entrada),
     )
     return resultado
@@ -346,7 +349,7 @@ def guardar_cambios(task_id: str, cambios: dict[str, dict], nuevos: list[dict], 
         manuales = {nuevo_arca[i]: nuevo_mayor[j] for i, j in tarea.manuales.items() if i in nuevo_arca and j in nuevo_mayor}
 
         nueva = Entrada(arca, entrada.mayor._replace(retenciones=retenciones), entrada.hasta_periodo,
-                        entrada.empresa, entrada.cuit_empresa)
+                        entrada.empresa, entrada.cuit_empresa, entrada.desde_periodo)
         tarea.resultado = _cruzar(nueva, manuales)
         tarea.entrada = nueva
         tarea.manuales = manuales

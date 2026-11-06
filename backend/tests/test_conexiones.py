@@ -274,11 +274,11 @@ def test_automatico_arca_primero_y_libro_mayor_por_pantalla(tmp_path, monkeypatc
     assert estado["status"] == "completado", estado
     assert estado["resumen"]["total_conciliados"] == 2
     # Primero ARCA (sin impuesto elegido: Ganancias e IVA); despues Xubio con
-    # las mismas fechas, estiradas en la tolerancia, cuenta por impuesto.
+    # las mismas fechas que eligio la persona, cuenta por impuesto.
     assert orden == [
         ("arca", ["217", "767"]),
-        ("xubio", date(2026, 10, 1), date(2026, 11, 5), "Ganancias", "RetencionPercepcion"),
-        ("xubio", date(2026, 10, 1), date(2026, 11, 5), "IVA", "RetencionPercepcion"),
+        ("xubio", date(2026, 10, 1), date(2026, 10, 31), "Ganancias", "RetencionPercepcion"),
+        ("xubio", date(2026, 10, 1), date(2026, 10, 31), "IVA", "RetencionPercepcion"),
     ]
 
 
@@ -351,7 +351,19 @@ def test_automatico_si_la_pantalla_falla_usa_el_reporte(tmp_path, monkeypatch):
     estado, orden = _automatico(tmp_path, monkeypatch, falla)
     assert estado["status"] == "completado", estado
     assert estado["resumen"]["total_conciliados"] == 2
-    assert orden[-1] == ("reporte", date(2026, 10, 1), date(2026, 11, 5))
+    assert orden[-1] == ("reporte", date(2026, 10, 1), date(2026, 10, 31))
+
+
+def test_mayor_fuera_del_periodo_no_se_acepta():
+    from app.bots.conexiones import _exigir_periodo
+    from app.bots.libro_mayor_xubio import ErrorPantallaXubio
+    from app.services.importador_mayor import LecturaMayor
+
+    desde, hasta = date(2026, 10, 1), date(2026, 11, 5)
+    _exigir_periodo(LecturaMayor([{"fecha": date(2026, 10, 31)}], []), desde, hasta)
+    # Sin el filtro, Xubio devuelve el año entero.
+    with pytest.raises(ErrorPantallaXubio, match="fuera del período"):
+        _exigir_periodo(LecturaMayor([{"fecha": date(2026, 1, 8)}], []), desde, hasta)
 
 
 def test_automatico_sin_conexiones():

@@ -12,10 +12,10 @@ import { peso } from './revision.util';
   host: { class: 'block' },
   template: `
     <label (dragover)="sobre($event)" (dragleave)="salir($event)" (drop)="soltar($event)"
-      class="block cursor-pointer rounded-lg border border-dashed px-4 py-5 text-center text-sm transition-colors focus-within:border-brand-400"
+      class="block cursor-pointer rounded-lg border border-dashed px-4 py-2.5 text-center text-sm transition-colors focus-within:border-brand-400"
       [class]="encima() ? 'border-brand-400 bg-brand-50' : 'border-line bg-white hover:bg-canvas/60'">
-      <span class="block font-semibold">Arrastra aquí los PDFs de respaldo (Certificados, Notas de crédito) que justifican tus ajustes en el Excel</span>
-      <span class="mt-1 block text-xs text-muted">o hacé clic para elegirlos · PDF, JPG o PNG · hasta {{ maxMb() }} MB por archivo</span>
+      <span class="block font-semibold">Arrastra aquí los PDFs de respaldo (Certificados, Notas de crédito)</span>
+      <span class="block text-xs text-muted">Justifican tus ajustes en el Excel · o hacé clic para elegirlos · PDF, JPG o PNG · hasta {{ maxMb() }} MB por archivo</span>
       <input type="file" multiple class="sr-only" [attr.accept]="extensiones().join(',')" (change)="elegir($event)" [disabled]="store.ocupado()"
         aria-label="Elegir comprobantes" />
     </label>

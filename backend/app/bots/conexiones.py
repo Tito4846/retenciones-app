@@ -105,10 +105,9 @@ def traer_automatico(
     Todo sin archivos, en el orden en que lo haria una persona:
 
     1. ARCA: Mis Retenciones con la CUIT, el periodo, el impuesto y el tipo.
-    2. Xubio: el bot entra a Libro Mayor, pone las mismas fechas (estiradas en
-       la tolerancia: el asiento se carga con la fecha del cobro) y en «Cuenta»
-       elige la del impuesto y el tipo de ARCA. Lo que muestra Xubio es lo
-       que se cruza.
+    2. Xubio: el bot entra a Libro Mayor, pone las mismas fechas que eligio la
+       persona y en «Cuenta» elige la del impuesto y el tipo de ARCA. Lo que
+       muestra Xubio es lo que se cruza.
     """
     opciones = (arca.formulario() or {}).get("impuestos", [])
     impuestos = impuestos or misret.impuestos_a_consultar(opciones)
@@ -133,9 +132,8 @@ def traer_automatico(
 
     descripciones = {o["codigo"]: o["descripcion"] for o in opciones}
     nombres = {impuesto_de_texto(c, descripciones.get(c)) for c in impuestos}
-    hasta_mayor = hasta + timedelta(days=settings.TOLERANCIA_DIAS)
     _frenar_si(cancelada)
-    return retenciones, libro_mayor_de_la_consulta(desde, hasta_mayor, nombres, tipo, avance, cancelada)
+    return retenciones, libro_mayor_de_la_consulta(desde, hasta, nombres, tipo, avance, cancelada)
 
 
 def libro_mayor_de_la_consulta(
@@ -170,7 +168,9 @@ def libro_mayor_de_la_consulta(
                         xml,
                     )
                 )
-        return unir_mayores(partes)
+        mayor = unir_mayores(partes)
+        _exigir_periodo(mayor, desde, hasta)
+        return mayor
     except ErrorPantallaXubio as e:
         logger.warning("Libro Mayor por pantalla: %s. Se usa el reporte.", e)
         _frenar_si(cancelada)
@@ -178,6 +178,16 @@ def libro_mayor_de_la_consulta(
         return cuenta_de_la_consulta(_mayor_por_reporte(desde, hasta, avance), impuestos, tipo)
     except (XubioDesconectado, ErrorXubio) as e:
         raise ErrorDeConexion(str(e)) from e
+
+
+def _exigir_periodo(mayor: LecturaMayor, desde: date, hasta: date) -> None:
+    """Un asiento fuera de las fechas pedidas: la pantalla no tomo el filtro."""
+    fechas = [m["fecha"] for m in mayor.retenciones + mayor.aplicaciones if m.get("fecha")]
+    if fechas and (min(fechas) < desde or max(fechas) > hasta):
+        raise ErrorPantallaXubio(
+            f"Xubio devolvió asientos del {min(fechas):%d/%m/%Y} al {max(fechas):%d/%m/%Y}, "
+            f"fuera del período pedido."
+        )
 
 
 def _mayor_por_reporte(desde: date, hasta: date, avance: Avance) -> LecturaMayor:

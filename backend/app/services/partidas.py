@@ -139,16 +139,18 @@ def armar(resultado: dict, entrada) -> list[dict]:
     """Las partidas (en el orden del Excel) a partir del cruce y lo leído de cada lado."""
     tolerancia = resultado["resumen"].get("tolerancia_dias", settings.TOLERANCIA_DIAS)
     hasta = parse_fecha(resultado["resumen"].get("hasta_periodo"))
+    # Sin el inicio elegido (versiones viejas), el mes del final del período.
+    desde = parse_fecha(resultado["resumen"].get("desde_periodo")) or (hasta.replace(day=1) if hasta else None)
     detalle = resultado["detalle"]
     mayor = [normalizar_mayor(m) for m in entrada.mayor.retenciones]
     arca = [normalizar_arca(r) for r in entrada.arca]
     sugeridos = {s.get("id_arca") for s in resultado.get("sugerencias", [])} | {
         s.get("id_mayor") for s in resultado.get("sugerencias", [])}
 
-    def fuera_del_mes(mes_de: date | None) -> bool:
-        if hasta is None or mes_de is None:
+    def fuera_del_periodo(fecha: date | None) -> bool:
+        if hasta is None or fecha is None:
             return False
-        return (mes_de.year, mes_de.month) != (hasta.year, hasta.month)
+        return not desde <= fecha <= hasta
 
     partidas: list[dict] = []
     for c in detalle["conciliados"]:
@@ -192,7 +194,7 @@ def armar(resultado: dict, entrada) -> list[dict]:
             flags.append("DUP")
         if p["_cuit"] and not cuit_valida(p["_cuit"]):
             flags.append("CUIT_INV")
-        if fuera_del_mes(p["_fecha"]):
+        if fuera_del_periodo(p["_fecha"]):
             flags.append("FUERA_PER")
         if p["id"] in sugeridos:
             flags.append("SUG")

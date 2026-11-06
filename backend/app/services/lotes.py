@@ -377,8 +377,9 @@ def desde_cruce(usuario: Usuario, tarea) -> dict:
             (periodo, cuit, cuit, cuit, empresa)).fetchone()
         lote = dict(fila) if fila else None
         sin_cambios = bool(lote) and (
-            {p["clave"]: p["hash_fila"] for p in _partidas(c, _version_vigente(c, lote)["id"])}
-            == {p["clave"]: p["hash_fila"] for p in partidas})
+            # Las marcas no entran en el hash, pero también se ven en el lote.
+            {p["clave"]: (p["hash_fila"], p["flags"]) for p in _partidas(c, _version_vigente(c, lote)["id"])}
+            == {p["clave"]: (p["hash_fila"], p["flags"]) for p in partidas})
     if lote is None:
         armado = crear(usuario, tarea, empresa, cuit, periodo, "Generado al terminar la conciliación.")
     elif lote["estado"] not in EDITABLES:

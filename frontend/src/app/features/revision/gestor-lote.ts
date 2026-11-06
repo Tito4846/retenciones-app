@@ -10,20 +10,20 @@ import { CONCILIADO, ORIGEN_VERSION } from './revision.util';
 @Component({
   selector: 'app-gestor-lote',
   imports: [DatePipe, EvidenciaLote, ExcepcionesLote],
-  host: { class: 'block space-y-4' },
+  host: { class: 'block space-y-3' },
   template: `
     @let det = detalle();
-    <section class="rounded-xl border border-line bg-white p-4">
-      <div class="grid gap-3 sm:grid-cols-2">
+    <section class="rounded-xl border border-line bg-white p-3">
+      <div class="grid gap-2 sm:grid-cols-2">
         <button type="button" (click)="descargar()" [disabled]="!vigente()"
-          class="flex items-center justify-center gap-2 rounded-lg border border-line bg-white px-4 py-3 font-semibold hover:bg-canvas disabled:opacity-50">
+          class="flex items-center justify-center gap-2 rounded-lg border border-line bg-white px-4 py-2 font-semibold hover:bg-canvas disabled:opacity-50">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5" aria-hidden="true">
             <path d="M12 3v12m0 0-4-4m4 4 4-4M4 19h16" />
           </svg>
           Descargar Excel de Trabajo
         </button>
         @if (editar()) {
-          <label class="flex cursor-pointer items-center justify-center gap-2 rounded-lg bg-brand-700 px-4 py-3 font-semibold text-white hover:bg-brand-800 focus-within:ring-2 focus-within:ring-brand-400"
+          <label class="flex cursor-pointer items-center justify-center gap-2 rounded-lg bg-brand-700 px-4 py-2 font-semibold text-white hover:bg-brand-800 focus-within:ring-2 focus-within:ring-brand-400"
             [class.opacity-50]="store.ocupado()">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5" aria-hidden="true">
               <path d="M12 16V4m0 0-4 4m4-4 4 4M4 20h16" />
@@ -33,28 +33,19 @@ import { CONCILIADO, ORIGEN_VERSION } from './revision.util';
           </label>
         }
       </div>
-      <p class="mt-3 text-sm font-semibold" [class]="porResolver() ? 'text-amber-800' : 'text-emerald-700'">
-        @if (porResolver().length; as n) {
-          Conciliaron solas {{ conciliadas() }} de {{ det.partidas.length }} partidas. {{ n === 1 ? 'Queda 1' : 'Quedan ' + n }} para resolver en el Excel.
-        } @else if (conciliadas() === det.partidas.length) {
-          Conciliaron solas todas las partidas.
-        } @else {
-          Conciliaron solas {{ conciliadas() }} de {{ det.partidas.length }} partidas. Las demás ya están resueltas.
+      <div class="mt-2 flex flex-wrap items-baseline justify-between gap-x-3 text-xs text-muted">
+        @if (vigente(); as v) {
+          <p>Versión vigente: {{ v.numero }} · {{ origen() }} · {{ v.autor_nombre }} · {{ v.creado_utc | date: 'dd/MM HH:mm' }}</p>
         }
-      </p>
-      @if (porResolver().length) {
-        <app-excepciones-lote [partidas]="porResolver()" [editar]="editar()" />
-      }
-      @if (vigente(); as v) {
-        <p class="mt-2 text-xs text-muted">
-          Versión vigente: {{ v.numero }} · {{ origen() }} · {{ v.autor_nombre }} · {{ v.creado_utc | date: 'dd/MM HH:mm' }}
-        </p>
-      }
-      @if (editar()) {
-        <p class="mt-1 text-xs text-muted">
-          En la hoja RESUMEN está la vista general. En CONCILIACION, lo que falta va arriba: completá Justificación y Comentario. Para llevar la diferencia a cero usá Importe ajustado, o poné Sí en Excluida contando el motivo.
-        </p>
-      }
+        @if (editar()) {
+          <details class="open:w-full">
+            <summary class="cursor-pointer font-semibold hover:text-brand-700">Cómo completar el Excel</summary>
+            <p class="mt-1">
+              En la hoja RESUMEN está la vista general. En CONCILIACION, lo que falta va arriba: completá Justificación y Comentario. Para llevar la diferencia a cero usá Importe ajustado, o poné Sí en Excluida contando el motivo.
+            </p>
+          </details>
+        }
+      </div>
 
       @if (store.errorExcel(); as e) {
         <div role="alert" class="mt-3 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900 transition duration-300 ease-out starting:-translate-y-1 starting:opacity-0 motion-reduce:transition-none">
@@ -80,6 +71,22 @@ import { CONCILIADO, ORIGEN_VERSION } from './revision.util';
     @if (editar()) {
       <app-evidencia-lote [revisar]="revisar()" [(archivos)]="evidencia" />
     }
+
+    <!-- Lo principal del lote: va suelto y entero, sin caja ni scroll propio -->
+    <section>
+      <h3 class="text-base font-semibold" [class]="porResolver().length ? 'text-amber-800' : 'text-emerald-700'">
+        @if (porResolver().length; as n) {
+          Conciliaron solas {{ conciliadas() }} de {{ det.partidas.length }} partidas. {{ n === 1 ? 'Queda 1' : 'Quedan ' + n }} para resolver en el Excel.
+        } @else if (conciliadas() === det.partidas.length) {
+          Conciliaron solas todas las partidas.
+        } @else {
+          Conciliaron solas {{ conciliadas() }} de {{ det.partidas.length }} partidas. Las demás ya están resueltas.
+        }
+      </h3>
+      @if (porResolver().length) {
+        <app-excepciones-lote [partidas]="porResolver()" [editar]="editar()" />
+      }
+    </section>
 
     @if (det.adjuntos.length) {
       <section>

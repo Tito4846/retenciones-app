@@ -678,3 +678,24 @@ def test_solo_importe_y_fecha_sigue_pidiendo_revision():
     par = {"criterio": "importe_fecha", "diferencia_importe": 0, "diferencia_dias": 1}
     assert P._estado_par(par, {"cuit": ""}, {"cuit": ""}, 7) == (P.PENDIENTE, "P01")
     assert P._estado_par({**par, "criterio": "razon_social"}, {"cuit": ""}, {"cuit": ""}, 7) == (P.CONCILIADO, "")
+
+
+def test_fuera_de_periodo_mira_el_rango_elegido(ruta_arca, ruta_mayor):
+    tarea = tareas.obtener(_cruce_con_cliente(ruta_arca, ruta_mayor))
+    # «Año en curso»: octubre está adentro, aunque el período termine en noviembre.
+    tarea.resultado["resumen"].update(desde_periodo="2026-01-01", hasta_periodo="2026-11-06")
+    assert not any("FUERA_PER" in p["flags"] for p in P.armar(tarea.resultado, tarea.entrada))
+    tarea.resultado["resumen"].update(desde_periodo="2026-11-01")
+    assert all("FUERA_PER" in p["flags"] for p in P.armar(tarea.resultado, tarea.entrada))
+    # Una conciliación vieja, sin el inicio: el mes del final, como antes.
+    tarea.resultado["resumen"].update(desde_periodo=None, hasta_periodo="2026-11-30")
+    assert all("FUERA_PER" in p["flags"] for p in P.armar(tarea.resultado, tarea.entrada))
+
+
+def test_si_solo_cambian_las_marcas_el_lote_suma_version(ruta_arca, ruta_mayor):
+    primero = _desde_cruce(_cruce_con_cliente(ruta_arca, ruta_mayor)).json()["lote"]
+    task_id = _cruce_con_cliente(ruta_arca, ruta_mayor)
+    tareas.obtener(task_id).resultado["resumen"].update(desde_periodo="2026-11-01", hasta_periodo="2026-11-06")
+    segundo = _desde_cruce(task_id).json()
+    assert segundo["lote"]["id"] == primero["id"] and segundo["lote"]["version_vigente"] == 2
+    assert all("FUERA_PER" in p["flags"] for p in segundo["partidas"])

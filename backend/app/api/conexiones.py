@@ -186,5 +186,6 @@ def automatico(background: BackgroundTasks, consulta: ConsultaMisRetenciones) ->
         ),
         hasta_periodo=consulta.hasta,
         identidad=lambda: (conexiones.xubio.estado()["empresa_activa"] or "", consulta.cuit_retenido),
+        desde_periodo=consulta.desde,
     )
     return {"task_id": task_id}

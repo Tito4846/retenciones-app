@@ -125,13 +125,25 @@ def abrir_filtros(pestana: Any) -> tuple[Any, Any]:
 
 
 def _poner_fecha(campo: Any, dia: date) -> None:
-    if (campo.get_attribute("type") or "").lower() == "date":
-        campo.fill(dia.isoformat())
-        return
-    campo.click()
-    campo.press("Control+a")
-    campo.type(dia.strftime("%d/%m/%Y"), delay=40)
-    campo.press("Tab")
+    """
+    Xubio no tiene un campo de fecha: son tres casilleros (dia, mes y año, con
+    maxlength) dentro de .widgetDate. Se completan directo y no con el teclado:
+    dia y mes tienen un onkeydown propio que bloquea Ctrl+A y salta solo al
+    siguiente casillero, y lo que se teclea se pierde. Al aceptar, FAFWidgetDate
+    lee el valor de cada casillero (getValue), asi que alcanza con dejarlo ahi.
+    Se relee: si no quedo lo pedido hay que enterarse aca, no en el cruce.
+    """
+    caja = campo.locator("xpath=ancestor::div[contains(concat(' ', @class, ' '), ' widgetDate ')][1]")
+    if not caja.count():
+        raise ErrorPantallaXubio("No encontré los casilleros de fecha de «Elige los filtros».")
+    partes = (("day", dia.day), ("month", dia.month), ("year", dia.year))
+    for nombre, valor in partes:
+        casillero = caja.locator(f"input[name={nombre}]")
+        casillero.fill(f"{valor:02d}", timeout=_ESPERA_MS)
+    casillero.blur()  # Xubio valida la fecha al salir
+    quedo = tuple(int(caja.locator(f"input[name={nombre}]").input_value() or 0) for nombre, _ in partes)
+    if quedo != (dia.day, dia.month, dia.year):
+        raise ErrorPantallaXubio(f"Xubio no tomó la fecha {dia:%d/%m/%Y}.")
 
 
 # La lista que abre «Cuenta»: casillas por cuenta, un buscador propio (queda

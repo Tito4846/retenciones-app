@@ -38,8 +38,15 @@ PANTALLA = """<html><body>
 <div id="filtros">
   <h2>Elige los filtros</h2>
   <table>
-    <tr><td>Desde</td><td><input type="date" id="desde" value="2026-01-01"></td>
-        <td>Hasta</td><td><input type="date" id="hasta" value="2026-11-03"></td></tr>
+    <!-- Como Xubio: tres casilleros, y cada uno corta en su maxlength -->
+    <tr><td>Desde</td><td><div class="widgetDateContainer"><div class="widgetDate" id="desde">
+          <input type="textbox" name="day" maxlength="2" value="01"><span>/</span>
+          <input type="textbox" name="month" maxlength="2" value="01"><span>/</span>
+          <input type="textbox" name="year" maxlength="4" value="2026"></div></div></td>
+        <td>Hasta</td><td><div class="widgetDateContainer"><div class="widgetDate" id="hasta">
+          <input type="textbox" name="day" maxlength="2" value="03"><span>/</span>
+          <input type="textbox" name="month" maxlength="2" value="11"><span>/</span>
+          <input type="textbox" name="year" maxlength="4" value="2026"></div></div></td></tr>
     <tr><td>Cuenta</td><td><input type="text" id="cuenta" autocomplete="off"></td>
         <td>Organización</td><td><input type="text"></td></tr>
   </table>
@@ -86,9 +93,27 @@ PANTALLA = """<html><body>
     cuentas = [...filas.children].filter((tr) => tr.querySelector('input').checked).map((tr) => tr.textContent);
     panel.style.display = 'none';
   };
+  // Como FAFWidgetDate: el teclado no entra como en un input comun. Ctrl+A no
+  // hace nada, y el segundo digito lo pone el widget y salta al casillero siguiente.
+  for (const caja of document.querySelectorAll('.widgetDate')) {
+    const [dia, mes, anio] = caja.querySelectorAll('input');
+    for (const [casillero, siguiente] of [[dia, mes], [mes, anio]]) {
+      casillero.onkeydown = (e) => {
+        if (e.ctrlKey) return false;
+        if (/^[0-9]$/.test(e.key) && casillero.value.length === 1) {
+          casillero.value += e.key;
+          siguiente.select();
+          siguiente.focus();
+          return false;
+        }
+        return true;
+      };
+    }
+  }
   document.querySelector('#aceptar').onclick = async () => {
-    const pedido = {desde: document.querySelector('#desde').value,
-                    hasta: document.querySelector('#hasta').value, cuentas};
+    const fecha = (id) => ['year', 'month', 'day']
+      .map((n) => document.querySelector(`#${id} input[name=${n}]`).value).join('-');
+    const pedido = {desde: fecha('desde'), hasta: fecha('hasta'), cuentas};
     const r = await fetch('/NXV/webreport/data?layout=LibroMayor', {method: 'POST', body: JSON.stringify(pedido)});
     document.querySelector('#filtros').style.display = 'none';
     document.querySelector('#grilla').textContent = await r.text();
@@ -165,6 +190,18 @@ def pestana():
     yield navegador.new_page()
     navegador.close()
     playwright.stop()
+
+
+def test_si_xubio_no_toma_la_fecha_avisa(pestana, pantalla, monkeypatch):
+    monkeypatch.setattr(settings, "XUBIO_WEB_URL", pantalla)
+    pestana.goto(pantalla + libro_mayor_xubio.RUTA_LIBRO_MAYOR)
+    # Xubio pisa el dia al salir del casillero.
+    pestana.evaluate("""() => document.querySelectorAll('#hasta input').forEach((i) =>
+      i.addEventListener('input', () => { document.querySelector('#hasta input[name=day]').value = '03'; }))""")
+    with pytest.raises(libro_mayor_xubio.ErrorPantallaXubio, match="no tomó la fecha 31/10/2026"):
+        libro_mayor_xubio.recorrer(pestana, date(2026, 10, 1), date(2026, 10, 31), "Ganancias", "Retencion")
+    # La pestaña es compartida: la que sigue arranca sin el casillero saboteado.
+    pestana.reload()
 
 
 def test_recorre_libro_mayor_con_las_fechas_y_las_cuentas_de_arca(pestana, pantalla, monkeypatch):
