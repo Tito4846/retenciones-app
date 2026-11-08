@@ -20,6 +20,12 @@ const PESTANAS: { id: Bandeja; titulo: string }[] = [
   host: { class: 'flex min-h-0 flex-col rounded-2xl border border-line bg-white' },
   template: `
     <div class="space-y-2 border-b border-line p-3">
+      <div class="flex items-baseline justify-between gap-2 px-1">
+        <h2 class="text-sm font-semibold">Solicitudes de revisión</h2>
+        @if (nuevas()) {
+          <span class="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900 tabular-nums">{{ nuevas() }} {{ nuevas() === 1 ? 'nueva' : 'nuevas' }}</span>
+        }
+      </div>
       <div class="grid grid-cols-3 gap-1 rounded-lg bg-canvas p-1 text-xs font-semibold" role="tablist" aria-label="Bandejas">
         @for (t of pestanas; track t.id) {
           <button type="button" role="tab" [attr.aria-selected]="bandeja() === t.id" (click)="elegida.set(t.id)"
@@ -113,6 +119,12 @@ export class BandejaLotes {
     const cuenta = { mias: 0, espera: 0, cerrados: 0 };
     for (const l of this.store.lotes()) cuenta[this.lugar(l)]++;
     return cuenta;
+  });
+
+  /** Solicitudes que todavía no tomó nadie y que no preparó este supervisor. */
+  protected readonly nuevas = computed(() => {
+    const yo = this.yo();
+    return this.store.lotes().filter((l) => l.estado === 'pendiente' && !l.autores.includes(yo)).length;
   });
 
   protected readonly visibles = computed(() => {

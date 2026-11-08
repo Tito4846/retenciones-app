@@ -983,12 +983,22 @@ def _detalle(c: sqlite3.Connection, lote_id: str) -> dict:
     }
 
 
+def puede_ver(usuario: Usuario, lote: dict) -> bool:
+    """Un supervisor ve todos los lotes; un empleado, solo donde participó."""
+    def mismo(valor: str | None) -> bool:
+        return (valor or "").casefold() == usuario.id.casefold()
+
+    return usuario.tiene("supervisor") or mismo(lote.get("maker_id")) or any(
+        mismo(autor) for autor in lote.get("autores", []))
+
+
 def detalle(lote_id: str) -> dict:
     with transaccion(escritura=False) as c:
         return _detalle(c, lote_id)
 
 
-def listar(estado: str | None = None, periodo: str | None = None, texto: str | None = None) -> list[dict]:
+def listar(estado: str | None = None, periodo: str | None = None, texto: str | None = None,
+           usuario: Usuario | None = None) -> list[dict]:
     condiciones, parametros = [], []
     if estado:
         condiciones.append("l.estado = ?")
@@ -999,6 +1009,14 @@ def listar(estado: str | None = None, periodo: str | None = None, texto: str | N
     if texto:
         condiciones.append("(l.empresa LIKE ? OR l.cuit_empresa LIKE ? OR l.maker_nombre LIKE ? OR l.checker_nombre LIKE ?)")
         parametros += [f"%{texto}%"] * 4
+    # El empleado ve solo los lotes en los que participó. El supervisor ve la bandeja completa.
+    # Sin distinguir mayúsculas: los lotes migrados guardaron el nombre como id.
+    if usuario is not None and not usuario.tiene("supervisor"):
+        condiciones.append(
+            "(LOWER(l.maker_id) = LOWER(?) OR EXISTS (SELECT 1 FROM lote_version lv "
+            "WHERE lv.lote_id = l.id AND LOWER(lv.autor_id) = LOWER(?)))"
+        )
+        parametros += [usuario.id, usuario.id]
     donde = f"WHERE {' AND '.join(condiciones)}" if condiciones else ""
     with transaccion(escritura=False) as c:
         filas = c.execute(

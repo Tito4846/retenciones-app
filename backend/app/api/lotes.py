@@ -2,7 +2,7 @@
 
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -88,8 +88,8 @@ def catalogo() -> dict:
 
 
 @router.get("/lotes")
-def listar(_: UsuarioActual, estado: str | None = None, periodo: str | None = None, texto: str | None = None) -> dict:
-    return {"lotes": lotes.listar(estado, periodo, texto)}
+def listar(usuario: UsuarioActual, estado: str | None = None, periodo: str | None = None, texto: str | None = None) -> dict:
+    return {"lotes": lotes.listar(estado, periodo, texto, usuario)}
 
 
 @router.post("/lotes", status_code=201)
@@ -107,8 +107,11 @@ def desde_cruce(usuario: UsuarioActual, datos: DesdeCruce) -> dict:
 
 
 @router.get("/lotes/{lote_id}")
-def detalle(_: UsuarioActual, lote_id: str) -> dict:
-    return lotes.detalle(lote_id)
+def detalle(usuario: UsuarioActual, lote_id: str) -> dict:
+    d = lotes.detalle(lote_id)
+    if not lotes.puede_ver(usuario, d["lote"]):
+        raise HTTPException(403, {"codigo": "SIN_PERMISO", "mensaje": "No podés ver este lote.", "errores": []})
+    return d
 
 
 @router.post("/lotes/{lote_id}/rectificar", status_code=201)
