@@ -119,7 +119,25 @@ def test_codigo_de_recuperacion_sirve_una_sola_vez():
             assert resp.status_code == 401
 
 
-def test_mensajes_iguales_y_bloqueo_por_intentos():
+def test_sin_bloqueo_por_defecto_se_puede_seguir_probando():
+    """Sin cooldown: después de muchos fallos la contraseña correcta entra igual."""
+    _configurar_principal()
+    codigos = [
+        cliente.post("/api/auth/ingresar", json={"email": PRINCIPAL, "clave": "otra clave cualquiera"}).status_code
+        for _ in range(30)
+    ]
+    assert set(codigos) == {401}  # nunca 429
+    assert cliente.post("/api/auth/ingresar", json={"email": PRINCIPAL, "clave": CLAVE}).status_code == 200
+    from app.core.db import transaccion
+
+    with transaccion(escritura=False) as c:
+        acciones = [f["action_type"] for f in c.execute("SELECT action_type FROM auditoria")]
+    # Los fallos igual quedan registrados.
+    assert acciones.count("ingreso_fallido") >= 30 and "cuenta_bloqueada" not in acciones
+
+
+def test_mensajes_iguales_y_bloqueo_por_intentos(monkeypatch):
+    monkeypatch.setattr(settings, "INTENTOS_MAX", 5)  # el bloqueo se puede volver a prender
     _configurar_principal()
     inexistente = cliente.post("/api/auth/ingresar", json={"email": "nadie@x.com", "clave": "lo que sea 123"})
     mala = cliente.post("/api/auth/ingresar", json={"email": PRINCIPAL, "clave": "otra clave cualquiera"})
@@ -138,7 +156,8 @@ def test_mensajes_iguales_y_bloqueo_por_intentos():
     assert "cuenta_bloqueada" in acciones and acciones.count("ingreso_fallido") >= settings.INTENTOS_MAX
 
 
-def test_limite_por_ip():
+def test_limite_por_ip(monkeypatch):
+    monkeypatch.setattr(settings, "LIMITAR_INGRESO_IP", True)
     S.limitador_ingreso.limpiar()
     codigos = [cliente.post("/api/auth/ingresar", json={"email": "x@x.com", "clave": "abcdefghijklm"}).status_code for _ in range(25)]
     assert 429 in codigos

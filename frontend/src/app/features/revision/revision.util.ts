@@ -27,7 +27,6 @@ export interface Permisos {
   /** Supervisor que preparó el lote: lo ve, pero no lo puede aprobar. */
   autor: boolean;
   anular: boolean;
-  exportar: boolean;
   /** Borrar del todo un lote cerrado: lo habilita el servidor, para probar. */
   eliminar: boolean;
 }

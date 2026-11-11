@@ -61,7 +61,6 @@ export class RevisionPantalla {
       revisar,
       autor: abierto && supervisor && autor,
       anular: !!lote && ['borrador', 'pendiente', 'rechazado'].includes(lote.estado) && this.sesion.puedePreparar(),
-      exportar: lote?.estado === 'aprobado',
       eliminar: !abierto && !!lote && supervisor && !!this.store.catalogo()?.eliminar_cerrados,
     };
   });

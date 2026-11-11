@@ -25,7 +25,9 @@ const CAMPOS: Record<string, string> = {
             <span class="text-muted">· {{ v.autor_nombre }} · {{ v.creado_utc | date: 'dd/MM/yyyy HH:mm' }}</span>
             @if (v.sellada_utc) { <span class="rounded bg-zinc-100 px-1.5 text-xs text-zinc-600">sellada</span> }
             <span class="flex-1"></span>
-            <button type="button" (click)="store.bajarVersion(det.lote.id, v.numero, v.nombre_archivo)" class="text-xs font-semibold text-brand-700 hover:underline">Bajar Excel</button>
+            @if (!cerrado()) {
+              <button type="button" (click)="store.bajarVersion(det.lote.id, v.numero, v.nombre_archivo)" class="text-xs font-semibold text-brand-700 hover:underline">Bajar Excel</button>
+            }
           </div>
           @if (v.validacion.advertencias?.length || v.validacion.errores?.length) {
             <ul class="mt-2 list-disc pl-5 text-xs">
@@ -79,6 +81,8 @@ export class VersionesLote {
   protected readonly pesos = pesos;
 
   readonly detalle = input.required<DetalleLote>();
+  /** Aprobado o anulado: se baja solo el Excel definitivo, desde arriba. */
+  protected readonly cerrado = computed(() => ['aprobado', 'anulado'].includes(this.detalle().lote.estado));
   protected readonly desde = signal(1);
   protected readonly hasta = signal(1);
   private readonly loteId = computed(() => this.detalle().lote.id);

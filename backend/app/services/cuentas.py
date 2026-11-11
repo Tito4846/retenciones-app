@@ -5,8 +5,9 @@ Ingreso
 -------
 1. Correo + contraseña (`ingresar`). Error siempre genérico («Correo o contraseña
    incorrectos»), con el mismo trabajo de hash exista o no la cuenta: no se puede
-   averiguar qué correos tienen cuenta. Cada fallo suma; a los INTENTOS_MAX la
-   cuenta se bloquea BLOQUEO_MIN minutos. Además hay un límite por IP.
+   averiguar qué correos tienen cuenta. Cada fallo suma y queda en la auditoría.
+   Bloqueo opcional (apagado por defecto): con INTENTOS_MAX > 0, a esos fallos la
+   cuenta se bloquea BLOQUEO_MIN minutos; con LIMITAR_INGRESO_IP, límite por IP.
 2. Si faltan pasos, en vez de la sesión vuelve un *desafío* (token de 10 minutos,
    5 intentos) con el próximo paso: `2fa` (código de la app o de recuperación),
    `cambiar_clave` (clave temporal) o `enrolar_2fa` (supervisor sin segundo factor,
@@ -89,7 +90,7 @@ def publico(fila) -> dict:
         "principal": bool(fila["principal"]), "gestiona_usuarios": bool(fila["gestiona_usuarios"]),
         "activo": bool(fila["activo"]), "tiene_2fa": bool(fila["totp_cifrado"]), "exige_2fa": _exige_2fa(fila),
         "debe_cambiar_clave": bool(fila["debe_cambiar_clave"]),
-        "bloqueado": bool(fila["bloqueado_hasta"]) and not _vencido(fila["bloqueado_hasta"]),
+        "bloqueado": _bloqueo_activo() and bool(fila["bloqueado_hasta"]) and not _vencido(fila["bloqueado_hasta"]),
         "codigos_recuperacion_restantes": len(json.loads(fila["recuperacion_json"] or "[]")),
         "ultimo_ingreso_utc": fila["ultimo_ingreso_utc"], "creado_utc": fila["creado_utc"],
     }
@@ -215,14 +216,18 @@ def reiniciar_principal() -> str | None:
 # ----------------------------------------------------------------------
 
 
+def _bloqueo_activo() -> bool:
+    return settings.INTENTOS_MAX > 0
+
+
 def _limitar(ip: str) -> None:
-    if not S.limitador_ingreso.permitir(ip or "?"):
+    if settings.LIMITAR_INGRESO_IP and not S.limitador_ingreso.permitir(ip or "?"):
         raise _error(429, "DEMASIADOS_INTENTOS", "Demasiados intentos desde esta conexión. Esperá unos minutos.")
 
 
 def _sumar_fallo(c, fila, quien: Usuario, accion: str) -> None:
     intentos = fila["intentos_fallidos"] + 1
-    if intentos >= settings.INTENTOS_MAX:
+    if _bloqueo_activo() and intentos >= settings.INTENTOS_MAX:
         hasta = _iso(_ahora() + timedelta(minutes=settings.BLOQUEO_MIN))
         c.execute("UPDATE usuario SET intentos_fallidos = 0, bloqueado_hasta = ? WHERE id = ?", (hasta, fila["id"]))
         auditoria.registrar(c, quien, "cuenta_bloqueada", hasta=hasta)
@@ -266,7 +271,8 @@ def _ingresar(c, email: str, clave: str, quien: Usuario) -> dict | ErrorDeLote:
                             motivo="correo_inexistente")
         return _credenciales()
     actor = _usuario(fila, quien.ip, quien.user_agent)
-    if fila["bloqueado_hasta"] and not _vencido(fila["bloqueado_hasta"]):
+    # Con el bloqueo apagado no cuenta uno que haya quedado de antes.
+    if _bloqueo_activo() and fila["bloqueado_hasta"] and not _vencido(fila["bloqueado_hasta"]):
         auditoria.registrar(c, actor, "ingreso_fallido", motivo="cuenta_bloqueada")
         return _error(401, "CREDENCIALES", MENSAJE_CREDENCIALES + " Si fallaste varias veces, esperá unos minutos.")
     if not correcta:

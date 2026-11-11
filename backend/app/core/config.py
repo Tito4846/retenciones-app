@@ -44,8 +44,12 @@ class Settings(BaseSettings):
     # Aunque se use, a las tantas horas se vuelve a pedir la contraseña.
     SESION_HORAS: int = 12
     # Intentos fallidos seguidos antes de bloquear la cuenta, y por cuánto.
-    INTENTOS_MAX: int = 5
+    # 0 = sin bloqueo (los fallos igual quedan en la auditoría).
+    INTENTOS_MAX: int = 0
     BLOQUEO_MIN: int = 15
+    # Límite de intentos de ingreso por conexión (20 cada 5 minutos por IP).
+    # Apagado: es una herramienta local. Conviene prenderlo si se expone a internet.
+    LIMITAR_INGRESO_IP: bool = False
     # Segundo factor (Google Authenticator) obligatorio para los supervisores.
     # Apagado: cada uno lo activa si quiere desde «Mi cuenta».
     DOSFA_SUPERVISORES: bool = False

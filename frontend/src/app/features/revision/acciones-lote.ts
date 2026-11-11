@@ -17,7 +17,7 @@ const SIN_AUTOAPROBACION = 'No podés aprobar un lote que vos mismo preparaste';
         @if (tipo === 'aprobar') {
           <p class="text-sm text-emerald-900">
             Vas a aprobar la versión {{ lote.version_vigente }} de <strong>{{ lote.empresa }}</strong>.
-            Queda cerrada: no se va a poder editar ni borrar nada, y se habilita la exportación para la DDJJ.
+            Queda cerrada: no se va a poder editar ni borrar nada, y su Excel queda como el definitivo.
             @if (evidencia().length; as n) { Se {{ n === 1 ? 'adjunta 1 comprobante' : 'adjuntan ' + n + ' comprobantes' }} al cierre. }
           </p>
           @if (aMirar().length) {
@@ -48,71 +48,51 @@ const SIN_AUTOAPROBACION = 'No podés aprobar un lote que vos mismo preparaste';
       </div>
     }
 
-    @if (p.exportar) {
-      <div class="flex flex-wrap items-center gap-2">
-        <span class="mr-auto text-sm font-semibold">Exportación para la DDJJ</span>
-        @for (x of exportaciones(); track x[0]) {
-          <button type="button" (click)="store.exportar(lote.id, x[0])" class="rounded-lg bg-brand-700 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-800">{{ x[1] }}</button>
-        }
-        @if (p.eliminar) {
-          <button type="button" (click)="confirmar.set('eliminar')" class="px-2 text-sm font-semibold text-red-700 hover:underline">Eliminar lote</button>
-        }
-      </div>
-      @if (detalle().exportaciones.length) {
-        <p class="mt-2 flex flex-wrap gap-2 text-sm">
-          <span class="text-muted">Ya generadas:</span>
-          @for (e of detalle().exportaciones; track e.id) {
-            <button type="button" (click)="store.bajarExportacion(lote.id, e.id, e.nombre)" class="font-semibold text-brand-700 underline">{{ e.nombre }}</button>
-          }
-        </p>
+    @if (p.editar && evidencia().length) {
+      <p class="mb-2 text-xs text-muted">
+        {{ evidencia().length === 1 ? '1 comprobante espera' : evidencia().length + ' comprobantes esperan' }} la confirmación: se {{ evidencia().length === 1 ? 'adjunta' : 'adjuntan' }} al {{ p.revisar ? 'aprobar' : 'enviar' }}.
+      </p>
+    }
+    @if (p.editar && !p.revisar) {
+      <input type="text" [value]="nota()" (input)="nota.set($any($event.target).value)" aria-label="Nota para quien revisa"
+        placeholder="Nota para quien revisa (opcional)"
+        class="mb-2 w-full rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-brand-400" />
+    }
+    <div class="flex flex-wrap items-center justify-end gap-2">
+      <p class="mr-auto min-w-[12rem] flex-1 text-sm" [class]="trabas().length || aMirar().length ? 'text-amber-800' : 'text-muted'">{{ leyenda() }}</p>
+      @if (p.eliminar) {
+        <button type="button" (click)="confirmar.set('eliminar')" class="px-2 text-sm font-semibold text-red-700 hover:underline">Eliminar lote</button>
       }
-    } @else {
-      @if (p.editar && evidencia().length) {
-        <p class="mb-2 text-xs text-muted">
-          {{ evidencia().length === 1 ? '1 comprobante espera' : evidencia().length + ' comprobantes esperan' }} la confirmación: se {{ evidencia().length === 1 ? 'adjunta' : 'adjuntan' }} al {{ p.revisar ? 'aprobar' : 'enviar' }}.
-        </p>
+      @if (p.anular) {
+        <button type="button" (click)="confirmar.set('anular')" class="px-2 text-sm font-semibold text-muted hover:text-red-700">Anular</button>
       }
       @if (p.editar && !p.revisar) {
-        <input type="text" [value]="nota()" (input)="nota.set($any($event.target).value)" aria-label="Nota para quien revisa"
-          placeholder="Nota para quien revisa (opcional)"
-          class="mb-2 w-full rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-brand-400" />
+        <span [title]="trabasEnviar().join('\\n')">
+          <button type="button" (click)="enviar()" [disabled]="store.ocupado() || trabasEnviar().length > 0"
+            class="rounded-lg bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-50">
+            {{ lote.estado === 'rechazado' ? 'Reenviar a Revisión' : 'Enviar a Revisión' }}
+          </button>
+        </span>
       }
-      <div class="flex flex-wrap items-center justify-end gap-2">
-        <p class="mr-auto min-w-[12rem] flex-1 text-sm" [class]="trabas().length || aMirar().length ? 'text-amber-800' : 'text-muted'">{{ leyenda() }}</p>
-        @if (p.eliminar) {
-          <button type="button" (click)="confirmar.set('eliminar')" class="px-2 text-sm font-semibold text-red-700 hover:underline">Eliminar lote</button>
-        }
-        @if (p.anular) {
-          <button type="button" (click)="confirmar.set('anular')" class="px-2 text-sm font-semibold text-muted hover:text-red-700">Anular</button>
-        }
-        @if (p.editar && !p.revisar) {
-          <span [title]="trabasEnviar().join('\\n')">
-            <button type="button" (click)="enviar()" [disabled]="store.ocupado() || trabasEnviar().length > 0"
-              class="rounded-lg bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-50">
-              {{ lote.estado === 'rechazado' ? 'Reenviar a Revisión' : 'Enviar a Revisión' }}
-            </button>
-          </span>
-        }
-        @if (p.tomar) {
-          <button type="button" (click)="store.tomar(lote.id).subscribe()" [disabled]="store.ocupado()"
-            class="rounded-lg bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-800 disabled:opacity-50">Tomar para revisar</button>
-        }
-        @if (p.reasignar) {
-          <button type="button" (click)="store.tomar(lote.id).subscribe()" [disabled]="store.ocupado()"
-            class="rounded-lg bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-800 disabled:opacity-50">Pasármelo a mí</button>
-        }
-        @if (p.revisar) {
-          <button type="button" (click)="confirmar.set('rechazar')" [disabled]="store.ocupado()"
-            class="rounded-lg border border-red-300 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50">Devolver para Corregir</button>
-        }
-        @if (p.revisar || p.autor) {
-          <span [title]="p.autor ? sinAutoaprobacion : trabasAprobar().join('\\n')">
-            <button type="button" (click)="confirmar.set('aprobar')" [disabled]="store.ocupado() || p.autor || trabasAprobar().length > 0"
-              class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50">Aprobar y Cerrar Lote</button>
-          </span>
-        }
-      </div>
-    }
+      @if (p.tomar) {
+        <button type="button" (click)="store.tomar(lote.id).subscribe()" [disabled]="store.ocupado()"
+          class="rounded-lg bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-800 disabled:opacity-50">Tomar para revisar</button>
+      }
+      @if (p.reasignar) {
+        <button type="button" (click)="store.tomar(lote.id).subscribe()" [disabled]="store.ocupado()"
+          class="rounded-lg bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-800 disabled:opacity-50">Pasármelo a mí</button>
+      }
+      @if (p.revisar) {
+        <button type="button" (click)="confirmar.set('rechazar')" [disabled]="store.ocupado()"
+          class="rounded-lg border border-red-300 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50">Devolver para Corregir</button>
+      }
+      @if (p.revisar || p.autor) {
+        <span [title]="p.autor ? sinAutoaprobacion : trabasAprobar().join('\\n')">
+          <button type="button" (click)="confirmar.set('aprobar')" [disabled]="store.ocupado() || p.autor || trabasAprobar().length > 0"
+            class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50">Aprobar y Cerrar Lote</button>
+        </span>
+      }
+    </div>
   `,
 })
 export class AccionesLote {
@@ -134,7 +114,6 @@ export class AccionesLote {
   protected readonly motivo = linkedSignal({ source: this.loteId, computation: () => '' });
   protected readonly nota = linkedSignal({ source: this.loteId, computation: () => '' });
   protected readonly minimo = computed(() => this.store.catalogo()?.motivo_minimo ?? 15);
-  protected readonly exportaciones = computed(() => Object.entries(this.store.catalogo()?.exportaciones ?? {}));
 
   protected readonly trabas = computed(() => {
     const p = this.permisos();
@@ -159,6 +138,8 @@ export class AccionesLote {
       case 'rechazado': return `Se le devolvió a ${lote.maker_nombre} para corregir.`;
       case 'pendiente': return 'Esperando que lo tome un supervisor.';
       case 'en_revision': return `Lo está revisando ${lote.checker_nombre}.`;
+      case 'aprobado':
+        return `Aprobado${lote.checker_nombre ? ' por ' + lote.checker_nombre : ''}. Su Excel es el definitivo.`;
       default: return 'Anulado. Queda solo como registro.';
     }
   });

@@ -206,7 +206,7 @@ uv run python -m app.cli reiniciar-principal
   `/renovar` y `/salir` exigen además el encabezado `X-Requested-With` y un origen permitido (CSRF).
 - **Segundo factor** TOTP (RFC 6238), con el secreto cifrado en la base y sin aceptar dos veces el mismo código;
   10 códigos de recuperación de un solo uso (guardados como HMAC).
-- **Intentos:** 5 fallidos seguidos bloquean la cuenta 15 minutos; además, 20 intentos cada 5 minutos por IP.
+- **Intentos:** sin espera ni bloqueo por defecto (los fallos quedan en la auditoría). Se puede prender: `INTENTOS_MAX` (fallos seguidos que bloquean la cuenta `BLOQUEO_MIN` minutos) y `LIMITAR_INGRESO_IP=true` (20 intentos cada 5 minutos por IP). Conviene prenderlos si la app se expone a internet.
   El error es siempre «Correo o contraseña incorrectos» (no se puede averiguar qué correos tienen cuenta).
 - Todo queda en la **auditoría** encadenada: ingresos, fallos, bloqueos, salidas, altas, reseteos y reusos de token.
 - La clave del servidor (`SECRET_KEY`) se genera sola en `backend/datos/.secreto` (fuera de git). Fuera de

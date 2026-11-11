@@ -17,7 +17,8 @@ import { CONCILIADO } from './revision.util';
       <app-entrega-lote [detalle]="det" [editar]="editar()">
         @if (!editar()) {
           <button type="button" (click)="descargar()" [disabled]="!vigente()"
-            class="shrink-0 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold hover:bg-canvas disabled:opacity-50">Descargar Excel</button>
+            [class]="aprobado() ? 'bg-brand-700 text-white hover:bg-brand-800 border-brand-700' : 'bg-white hover:bg-canvas border-line'"
+            class="shrink-0 rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50">{{ aprobado() ? 'Descargar Excel aprobado' : 'Descargar Excel' }}</button>
         }
       </app-entrega-lote>
       @if (editar()) {
@@ -107,6 +108,8 @@ export class GestorLote {
   readonly evidencia = model<File[]>([]);
 
   private readonly selector = viewChild<ElementRef<HTMLInputElement>>('selector');
+  /** Cerrado y aprobado: el Excel de la versión vigente es el definitivo. */
+  protected readonly aprobado = computed(() => this.detalle().lote.estado === 'aprobado');
   protected readonly vigente = computed(() => this.detalle().versiones.find((v) => v.numero === this.detalle().lote.version_vigente) ?? null);
   protected readonly conciliadas = computed(() => this.detalle().partidas.filter((p) => p.estado === CONCILIADO).length);
   /** Todo lo que no concilió solo: el supervisor tiene que poder leer también lo ya justificado. */

@@ -1,9 +1,19 @@
-import { Component, computed, inject } from '@angular/core';
+import { Component, computed, inject, signal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { filter, map } from 'rxjs';
 import { LotesStore } from './core/services/lotes.store';
 import { SesionService } from './core/services/sesion.service';
+
+const CLAVE_MENU = 'retenciones.menu_plegado';
+
+function leerPlegada(): boolean {
+  try {
+    return typeof localStorage !== 'undefined' && localStorage.getItem(CLAVE_MENU) === '1';
+  } catch {
+    return false;
+  }
+}
 
 @Component({
   imports: [RouterOutlet, RouterLink, RouterLinkActive],
@@ -26,6 +36,18 @@ export class App {
   );
   /** Ingresar y configurar van a pantalla completa, sin el menú. */
   protected readonly sinMenu = computed(() => !this.sesion.usuario() || /^\/(ingresar|configurar)/.test(this.url()));
+
+  /** Menú plegado (solo íconos). Se recuerda en este navegador. */
+  protected readonly plegada = signal(leerPlegada());
+
+  protected alternarMenu(): void {
+    this.plegada.update((p) => !p);
+    try {
+      localStorage.setItem(CLAVE_MENU, this.plegada() ? '1' : '0');
+    } catch {
+      // Sin almacenamiento (modo privado): queda plegada solo hasta recargar.
+    }
+  }
 
   protected iniciales(nombre: string): string {
     const partes = nombre.match(/\p{L}+/gu) ?? [];
