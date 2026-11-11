@@ -232,6 +232,40 @@ npm run build
 npm run serve:ssr:retenciones-frontend
 ```
 
+## Despliegue en Render
+
+El repo trae un `Dockerfile` y un `render.yaml` (Blueprint). Es **un solo servicio**: la
+imagen compila el front y el backend lo sirve en el mismo dominio que la API (`/api`), así
+la cookie de sesión (`SameSite=Strict`) funciona sin CORS.
+
+1. Subir el repo a GitHub/GitLab.
+2. En Render: **New → Blueprint**, elegir el repo. Crea el servicio `retenciones` con un
+   **disco persistente** en `/var/data` (base SQLite, archivos y `.secreto`). El disco
+   requiere plan pago (`starter`); sin disco, todo se borra en cada deploy.
+3. Completar en el panel `EMPRESA` y, si se usan, `XUBIO_USUARIO` / `XUBIO_CLAVE`.
+4. Primer arranque: en **Logs** aparece el enlace `https://<servicio>.onrender.com/configurar#…`
+   para la contraseña de la cuenta principal (si se perdió, en **Shell**:
+   `python -m app.cli enlace-principal`).
+
+Detalles:
+
+- `FRONT_URL` toma sola la dirección pública (`RENDER_EXTERNAL_URL`).
+- El blueprint prende `LIMITAR_INGRESO_IP` e `INTENTOS_MAX=5`. Antes de cargar datos reales,
+  poné `PERMITIR_ELIMINAR_CERRADOS=false`.
+- **Bots:** la imagen trae Google Chrome y una pantalla virtual (Xvfb), pero en el servidor
+  **nadie ve la ventana**: el doble factor de ARCA y el captcha de Xubio no se pueden
+  completar. Funcionan solo las cuentas sin esos pasos; si no, usar la importación de archivos
+  o correr la app localmente para los bots.
+- Probar la imagen localmente:
+
+```bash
+docker build -t retenciones .
+```
+
+```bash
+docker run --rm -p 8001:8001 -v retenciones-datos:/var/data retenciones
+```
+
 ## Estructura
 
 ```

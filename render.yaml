@@ -1,0 +1,30 @@
+# Blueprint de Render: en el panel, New → Blueprint y elegir este repositorio.
+# Un solo servicio Docker sirve la API y el front en el mismo dominio.
+services:
+  - type: web
+    name: retenciones
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    # El disco persistente necesita un plan pago (no existe en el plan free).
+    plan: starter
+    region: oregon
+    healthCheckPath: /api/salud
+    autoDeploy: true
+    disk:
+      name: datos
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      # Expuesto a internet: limitar intentos de ingreso (ver README).
+      - key: LIMITAR_INGRESO_IP
+        value: "true"
+      - key: INTENTOS_MAX
+        value: "5"
+      # Se completan a mano en el panel de Render (no quedan en git).
+      - key: EMPRESA
+        sync: false
+      - key: XUBIO_USUARIO
+        sync: false
+      - key: XUBIO_CLAVE
+        sync: false

@@ -9,6 +9,7 @@ Origin permitido: un sitio ajeno no puede dispararlos (CSRF).
 
 import re
 from typing import Annotated, Literal
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
@@ -31,7 +32,9 @@ def _origen_permitido(request: Request) -> None:
     if request.headers.get("x-requested-with") != "retenciones":
         raise HTTPException(403, {"codigo": "CSRF", "mensaje": "Pedido no permitido.", "errores": []})
     origen = request.headers.get("origin")
-    if origen and not (_ORIGEN_LOCAL.match(origen) or origen in settings.CORS_ORIGINS):
+    # El front servido por el mismo backend (Render): el origen es el propio host.
+    mismo_sitio = bool(origen) and urlsplit(origen).netloc == request.headers.get("host")
+    if origen and not (mismo_sitio or _ORIGEN_LOCAL.match(origen) or origen in settings.CORS_ORIGINS):
         raise HTTPException(403, {"codigo": "CSRF", "mensaje": "Origen no permitido.", "errores": []})
 
 

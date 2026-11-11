@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -36,7 +37,13 @@ class Settings(BaseSettings):
     # es el respaldo de la DDJJ: esto va en False antes de trabajar con datos reales.
     PERMITIR_ELIMINAR_CERRADOS: bool = True
     # Dónde abre la persona el front (para el enlace de configuración inicial).
-    FRONT_URL: str = "http://localhost:4200"
+    # En Render, si no se define, se usa la dirección pública del servicio
+    # (RENDER_EXTERNAL_URL), que es donde el backend sirve también el front.
+    FRONT_URL: str = os.environ.get("RENDER_EXTERNAL_URL") or "http://localhost:4200"
+    # Carpeta con el build del front (dist/<app>/browser). Si existe, el backend
+    # sirve la app en el mismo dominio que la API (así se despliega en Render).
+    # Vacía o inexistente = solo API (desarrollo con `ng serve`).
+    FRONT_DIST: Path | None = None
     # Vida del token de acceso. Se renueva solo mientras se usa la app.
     ACCESO_MIN: int = 10
     # Sin usar la app este tiempo, hay que volver a ingresar.

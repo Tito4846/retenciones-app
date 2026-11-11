@@ -3,9 +3,11 @@ from contextlib import asynccontextmanager
 
 import sqlite3
 
-from fastapi import Depends, FastAPI, Request
+from pathlib import Path
+
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.api.auth import router as router_auth
@@ -119,3 +121,32 @@ def bloqueo_de_la_base(_: Request, error: sqlite3.IntegrityError) -> JSONRespons
 @app.get("/api/salud")
 def salud() -> dict:
     return {"status": "ok"}
+
+
+def _servir_front(carpeta: Path) -> None:
+    """
+    El build del front (todo se arma en el navegador) servido en el mismo dominio
+    que la API: así la cookie de renovación (SameSite=Strict) viaja sin CORS. Los
+    archivos que existen se devuelven tal cual; cualquier otra ruta es de Angular.
+    """
+    raiz = carpeta.resolve()
+    indice = next((raiz / n for n in ("index.csr.html", "index.html") if (raiz / n).is_file()), None)
+    if indice is None:
+        logger.warning("FRONT_DIST=%s no tiene index.html: se sirve solo la API.", raiz)
+        return
+
+    @app.get("/{ruta:path}", include_in_schema=False)
+    def front(ruta: str) -> FileResponse:
+        if ruta == "api" or ruta.startswith("api/"):
+            raise HTTPException(404)
+        archivo = (raiz / ruta).resolve()
+        if ruta and archivo.is_file() and archivo.is_relative_to(raiz):
+            # Los nombres llevan hash: se pueden guardar en caché para siempre.
+            return FileResponse(archivo, headers={"Cache-Control": "public, max-age=31536000, immutable"})
+        return FileResponse(indice, headers={"Cache-Control": "no-cache"})
+
+    logger.info("Sirviendo el front desde %s", raiz)
+
+
+if settings.FRONT_DIST and Path(settings.FRONT_DIST).is_dir():
+    _servir_front(Path(settings.FRONT_DIST))
