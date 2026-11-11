@@ -26,7 +26,7 @@ RUN uv sync --locked --no-dev --no-install-project
 # Bots: Google Chrome (CANAL_CHROME=chrome) y una pantalla virtual (Xvfb), porque
 # ARCA suele bloquear el modo headless.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends xvfb xauth \
+    && apt-get install -y --no-install-recommends xvfb \
     && playwright install --with-deps chrome \
     && rm -rf /var/lib/apt/lists/*
 
@@ -42,4 +42,6 @@ ENV FRONT_DIST=/app/front \
 EXPOSE 8001
 # Render pasa el puerto en $PORT. --proxy-headers: la IP real del cliente (auditoría
 # y límite de intentos) viene en X-Forwarded-For desde el proxy de Render.
-CMD ["sh", "-c", "exec xvfb-run -a uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8001} --proxy-headers --forwarded-allow-ips='*'"]
+# Xvfb se lanza a mano: xvfb-run se cuelga cuando es el proceso 1 del contenedor.
+ENV DISPLAY=:99
+CMD ["sh", "-c", "Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp & exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8001} --proxy-headers --forwarded-allow-ips='*'"]
