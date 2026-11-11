@@ -317,17 +317,50 @@ def test_bot_arca_consulta_cancelada_frena_antes_del_impuesto(tmp_path):
         bot._consultar_en_ventana(MagicMock(), MagicMock(), consulta, None, lambda: True)
 
 
+PORTAL = "https://portalcf.cloud.afip.gob.ar/portal/app/"
+
+
+def _respuestas_arca():
+    """(vencida, viva) como las manda ARCA, en Latin-1 (el bot lee los bytes)."""
+    vencida, viva = MagicMock(), MagicMock()
+    vencida.body.return_value = '<input id="F1:username">'.encode("latin-1")
+    vencida.url = "https://auth.afip.gob.ar/contribuyente_/login.xhtml"
+    viva.body.return_value = "<html>Mis Retenciones · Versión</html>".encode("latin-1")
+    viva.url = PORTAL
+    return vencida, viva
+
+
+def _portal_vencido(pestana):
+    """Al volver al portal, ARCA pide ingresar de nuevo (no aparece el buscador)."""
+    estado = {"vencido": False}
+
+    def goto(url, **_):
+        if url == PORTAL:
+            estado["vencido"] = True
+
+    def esperar_selector(selector, **_):
+        if estado.pop("vencido", False):
+            estado["vencido"] = False
+            raise TimeoutError("sin buscador")
+
+    pestana.goto.side_effect = goto
+    pestana.wait_for_selector.side_effect = esperar_selector
+
+
+def _claves(pestana):
+    return [c.args[1] for c in pestana.fill.call_args_list if c.args[1] == "clave-de-prueba"]
+
+
 def test_bot_arca_renueva_la_sesion_sola_con_los_mismos_datos(tmp_path, monkeypatch):
+    """Vencio el servicio y tambien el portal: ingreso completo con la misma CUIT y clave."""
     from app.bots import navegador_arca
 
     monkeypatch.setattr(navegador_arca, "MANTENER_VIVA_S", 0.2)
     lanzar, pestana = _chrome_falso([])
+    _portal_vencido(pestana)
     with lanzar() as (contexto, _):
         pass
-    # La primera revision vuelve con el login de ARCA (sesion vencida); despues, viva.
-    vencida, viva = MagicMock(), MagicMock()
-    vencida.text.return_value = '<input id="F1:username">'
-    viva.text.return_value = "<html>Mis Retenciones</html>"
+    vencida, viva = _respuestas_arca()
     contexto.request.get.side_effect = [vencida] + [viva] * 1000
 
     bot = NavegadorArca(lanzar=lanzar, directorio=tmp_path)
@@ -335,10 +368,94 @@ def test_bot_arca_renueva_la_sesion_sola_con_los_mismos_datos(tmp_path, monkeypa
     assert _esperar(lambda: "renovada" in (bot.estado()["mensaje"] or ""))
     assert bot.estado()["estado"] == CONECTADO
     # Entro dos veces con la misma CUIT y clave, sin pedirlas de nuevo.
-    claves = [c.args[1] for c in pestana.fill.call_args_list if c.args[1] == "clave-de-prueba"]
-    assert len(claves) == 2
+    assert len(_claves(pestana)) == 2
     contexto.clear_cookies.assert_called_once()
     assert "clave-de-prueba" not in str(bot.estado())
+    bot.desconectar()
+
+
+def test_bot_arca_vencido_el_servicio_reabre_con_las_cookies(tmp_path, monkeypatch):
+    """El portal sigue vivo: se vuelve a abrir Mis Retenciones sin escribir la clave."""
+    from app.bots import navegador_arca
+
+    monkeypatch.setattr(navegador_arca, "MANTENER_VIVA_S", 0.2)
+    lanzar, pestana = _chrome_falso([])
+    with lanzar() as (contexto, _):
+        pass
+    vencida, viva = _respuestas_arca()
+    contexto.request.get.side_effect = [vencida] + [viva] * 1000
+
+    bot = NavegadorArca(lanzar=lanzar, directorio=tmp_path)
+    bot.conectar("30712345678", "clave-de-prueba")
+    assert _esperar(lambda: "recuperada con las cookies" in (bot.estado()["mensaje"] or ""))
+    assert bot.estado()["estado"] == CONECTADO
+    assert len(_claves(pestana)) == 1  # solo el ingreso original
+    contexto.clear_cookies.assert_not_called()
+    pestana.goto.assert_any_call(PORTAL, timeout=navegador_arca.settings.TIMEOUT_NAVEGACION_MS)
+    bot.desconectar()
+
+
+def test_bot_arca_avisa_al_portal_y_si_cerro_vuelve_a_entrar(tmp_path, monkeypatch):
+    from app.bots import navegador_arca
+
+    monkeypatch.setattr(navegador_arca, "MANTENER_VIVA_S", 1000)  # que solo actue el aviso al portal
+    monkeypatch.setattr(navegador_arca.settings, "ARCA_MANTENER_PORTAL_MIN", 0.005)  # 0,3 s
+    lanzar, pestana = _chrome_falso([])
+    _portal_vencido(pestana)
+    with lanzar() as (contexto, _):
+        pass
+    vencida, viva = _respuestas_arca()
+    contexto.request.get.side_effect = [viva, vencida] + [viva] * 1000
+
+    bot = NavegadorArca(lanzar=lanzar, directorio=tmp_path)
+    bot.conectar("30712345678", "clave-de-prueba")
+    assert _esperar(lambda: "renovada" in (bot.estado()["mensaje"] or ""))
+    # Los avisos van al portal en el que quedo la ventana, con sus cookies.
+    assert all(c.args[0] == PORTAL for c in contexto.request.get.call_args_list)
+    assert contexto.request.get.call_count >= 2
+    assert len(_claves(pestana)) == 2
+    bot.desconectar()
+
+
+def test_bot_arca_si_mis_retenciones_vencio_a_mitad_renueva_y_repite(tmp_path):
+    """El pedido se topa con el 401 de seti: el bot reabre con las cookies y lo repite."""
+    from app.bots import misret
+
+    lanzar, pestana = _chrome_falso([])
+    bot = NavegadorArca(lanzar=lanzar, directorio=tmp_path)
+    bot.conectar("30712345678", "clave-de-prueba")
+    assert _esperar(lambda: bot.estado()["estado"] == CONECTADO)
+
+    intentos = []
+
+    def pedido(pestana_actual, contexto):
+        intentos.append(pestana_actual)
+        if len(intentos) == 1:
+            raise misret.SesionVencida()
+        return "consultado"
+
+    assert bot.ejecutar(pedido) == "consultado"
+    assert len(intentos) == 2
+    assert "recuperada con las cookies" in bot.estado()["mensaje"]
+    assert len(_claves(pestana)) == 1  # sin volver a escribir la clave
+    bot.desconectar()
+
+
+def test_bot_arca_revision_detecta_el_401_de_mis_retenciones(tmp_path, monkeypatch):
+    from app.bots import navegador_arca
+
+    monkeypatch.setattr(navegador_arca, "MANTENER_VIVA_S", 0.2)
+    lanzar, pestana = _chrome_falso([])
+    with lanzar() as (contexto, _):
+        pass
+    vencida, viva = _respuestas_arca()
+    vencida.status, viva.status = 401, 200
+    vencida.body.return_value = b"<h1>HTTP Status 401 - MISSING_AUTHENTICATION_INFO</h1>"
+    contexto.request.get.side_effect = [vencida] + [viva] * 1000
+
+    bot = NavegadorArca(lanzar=lanzar, directorio=tmp_path)
+    bot.conectar("30712345678", "clave-de-prueba")
+    assert _esperar(lambda: "recuperada con las cookies" in (bot.estado()["mensaje"] or ""))
     bot.desconectar()
 
 

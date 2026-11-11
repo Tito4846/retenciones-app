@@ -56,22 +56,23 @@ Variables principales:
 | `HEADLESS` | `false` | Chrome visible (necesario para el doble factor de ARCA y el captcha de Xubio) |
 | `ARCA_SERVICIO` | `Mis Retenciones` | Nombre del servicio en el buscador del portal de ARCA |
 | `ARCA_RENOVAR_SESION_MIN` | `50` | La sesión de ARCA se renueva sola con la misma CUIT y clave (solo en memoria mientras la ventana está abierta) cuando vence y, antes, a estos minutos sin uso. `0` = solo cuando vence. Con doble factor solo se renueva al vencer |
+| `ARCA_MANTENER_PORTAL_MIN` | `9` | Cada estos minutos el bot le avisa al portal de ARCA (con las cookies de la ventana) para que no cierre la sesión por inactividad (~15 min). Si igual vence, primero reabre Mis Retenciones con las cookies y, si el portal también venció, entra de nuevo con la CUIT y la clave. `0` = no avisar |
 | `XUBIO_USUARIO` / `XUBIO_CLAVE` | vacío | Si se completan, el bot escribe el ingreso a Xubio solo |
 | `XUBIO_CUENTAS_RETENCIONES` | `retencion,retenciones,percepcion,percepciones` | Palabras que identifican las cuentas de retenciones |
 | `CORS_ORIGINS` | `[]` | Orígenes extra permitidos (cualquier `localhost` ya está permitido) |
 
 La lista completa está en `backend/app/core/config.py`. La URL de la API que usa
 el frontend está en `frontend/src/environments/environment.ts`
-(`http://localhost:8000/api`).
+(`http://localhost:8001/api`).
 
 ## Levantar en desarrollo
 
 Desde la raíz del proyecto, en dos terminales:
 
-**Backend** (http://localhost:8000, docs en http://localhost:8000/docs):
+**Backend** (http://localhost:8001, docs en http://localhost:8001/docs):
 
 ```bash
-uv run --directory backend uvicorn app.main:app --port 8000 --reload --reload-dir app
+uv run --directory backend uvicorn app.main:app --port 8001 --reload --reload-dir app
 ```
 
 **Frontend** (http://localhost:4200):
@@ -81,7 +82,7 @@ npm --prefix frontend start
 ```
 
 Abrí http://localhost:4200 en el navegador. Para comprobar que el backend
-responde: http://localhost:8000/api/salud devuelve `{"status":"ok"}`.
+responde: http://localhost:8001/api/salud devuelve `{"status":"ok"}`.
 
 ## Cómo concilia
 

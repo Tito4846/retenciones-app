@@ -111,7 +111,7 @@ export class BandejaLotes {
 
   /** null = la elige sola: «Mis tareas» si hay algo. */
   protected readonly elegida = signal<Bandeja | null>(null);
-  protected readonly bandeja = computed<Bandeja>(() => this.elegida() ?? (this.store.paraMi() ? 'mias' : 'espera'));
+  protected readonly bandeja = computed<Bandeja>(() => this.elegida() ?? (this.cantidades().mias ? 'mias' : 'espera'));
   protected readonly busqueda = signal('');
   protected readonly yo = computed(() => this.sesion.usuario()?.id ?? '');
   protected readonly supervisor = this.sesion.esSupervisor;
@@ -150,10 +150,14 @@ export class BandejaLotes {
     });
   }
 
-  /** Cada lote está en una sola bandeja: lo que te espera a vos, lo que espera a otro, lo cerrado. */
+  /**
+   * Cada lote está en una sola bandeja: lo que ya es tuyo para mover, lo que
+   * espera (incluidos los enviados que todavía no tomó ningún supervisor) y lo
+   * cerrado.
+   */
   private lugar(l: LoteListado): Bandeja {
     if (this.cerrado(l.estado)) return 'cerrados';
-    return this.store.esperaA(l, this.yo()) ? 'mias' : 'espera';
+    return this.store.enMisTareas(l, this.yo()) ? 'mias' : 'espera';
   }
 
   private cerrado(estado: EstadoLote): boolean {

@@ -17,7 +17,7 @@ from app.services.importador_arca import leer_arca
 
 FORMULARIO = """<html><body>
 <form name="formulario" action="consultaMisRetenciones.do" method="post"
-      onsubmit="if (!this.fechaRetencionDesde.value) { alert('Debe ingresar la fecha desde'); return false; }">
+      onsubmit="return validar(this)">
   <input type="hidden" name="method" value="lookup">
   <select id="cuitRetenido" name="cuitRetenido" onchange="obtenerDenominacion(this.value)">
     <option value="">Seleccione una CUIT...</option>
@@ -32,6 +32,7 @@ FORMULARIO = """<html><body>
     <option value="217">217 - SICORE-IMPTO.A LAS GANANCIAS</option>
     <option value="767">767 - SICORE - RETENCIONES Y PERCEPC</option>
     <option value="216">216 - SIRE -  IVA</option>
+    <option value="219">219 - SICORE-IMPTO.S/ BS PERSONALES</option>
   </select>
   <input name="retencionPercepcion" type="radio" value="Retencion" style="visibility:hidden">
   <input name="retencionPercepcion" type="radio" value="Percepcion" style="visibility:hidden">
@@ -53,7 +54,10 @@ FORMULARIO = """<html><body>
   // solo el combinado; con el 216, solo Retencion (y ARCA la deja marcada).
   function setRetencionPercepcion(impuesto) {
     document.querySelectorAll('input[name=retencionPercepcion]').forEach(function (r) {
-      if (impuesto === '216') {
+      if (impuesto === '219') {
+        // Como ARCA el 2026-11-11: muestra los tres, pero el combinado lo rechaza al enviar.
+        r.style.visibility = 'visible';
+      } else if (impuesto === '216') {
         r.style.visibility = r.value === 'Retencion' ? 'visible' : 'hidden';
         r.checked = r.value === 'Retencion';
       } else if (r.value !== 'RetencionPercepcion') {
@@ -63,6 +67,16 @@ FORMULARIO = """<html><body>
       }
     });
   }
+
+  function validar(f) {
+    if (!f.fechaRetencionDesde.value) { alert('Debe ingresar la fecha desde'); return false; }
+    var tipo = f.querySelector('input[name=retencionPercepcion]:checked').value;
+    if (tipo === 'RetencionPercepcion' && f.impuesto.value !== '217' && f.impuesto.value !== '767') {
+      alert("No se puede seleccionar 'Retención y/o Percepción' para impuesto distinto a 217 y 767");
+      return false;
+    }
+    return true;
+  }
 </script></body></html>"""
 
 FILAS = {
@@ -71,24 +85,41 @@ FILAS = {
         ("30-71234567-8", "PROVEEDOR SRL", "20/10/2026", "77777", "8.300,75"),
         ("30-50000000-1", "BANCO EJEMPLO SA", "21/10/2026", "77778", "1.000,00"),
     ],
+    # El 219 se consulta por tipo: cada pedido devuelve lo suyo.
+    "219:Retencion": [("30-60000000-1", "AGENTE BP SA", "05/10/2026", "21901", "500,00")],
+    "219:Percepcion": [("30-60000000-2", "PERCEPTOR BP SA", "06/10/2026", "21902", "250,00")],
 }
 
 
 def _resultados(datos: dict) -> str:
     impuesto = datos["impuesto"][0]
+    tipo = datos["retencionPercepcion"][0]
     filas = "".join(
         f"<tr><td>{c}</td><td>{n}</td><td>{impuesto}</td><td>{f}</td><td>{cert}</td><td>{imp}</td></tr>"
-        for c, n, f, cert, imp in FILAS.get(impuesto, [])
+        for c, n, f, cert, imp in FILAS.get(f"{impuesto}:{tipo}", FILAS.get(impuesto, []))
     )
     if not filas:
-        return "<html><body>No se encontraron retenciones para los datos ingresados.</body></html>"
+        # El texto real de ARCA (2026-11-11).
+        return (
+            "<html><body>No se han encontrado datos para esta consulta o los parámetros ingresados "
+            "corresponden a retenciones /percepciones con importe en cero</body></html>"
+        )
     return f"""<html><body><table>
       <tr><th>CUIT Agente</th><th>Denominación</th><th>Impuesto</th><th>Fecha Ret./Perc.</th>
           <th>Nro. Certificado</th><th>Importe Ret./Perc.</th></tr>{filas}</table></body></html>"""
 
 
+# Lo que contesta seti con la sesion de Mis Retenciones vencida (2026-11-11).
+SESION_VENCIDA = (
+    "<html><head><title>JBoss Web/7.0.13.Final - Error report</title></head><body>"
+    "<h1>HTTP Status 401 - MISSING_AUTHENTICATION_INFO</h1><p><b>description</b> "
+    "<u>This request requires HTTP authentication (MISSING_AUTHENTICATION_INFO).</u></p></body></html>"
+)
+
+
 class _Arca(BaseHTTPRequestHandler):
     recibidos: list[dict] = []
+    vencida = False
 
     def _html(self, cuerpo: str) -> None:
         self.send_response(200)
@@ -97,6 +128,12 @@ class _Arca(BaseHTTPRequestHandler):
         self.wfile.write(cuerpo.encode("utf-8"))
 
     def do_GET(self):  # noqa: N802
+        if _Arca.vencida:
+            self.send_response(401)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(SESION_VENCIDA.encode("utf-8"))
+            return
         self._html(FORMULARIO)
 
     def do_POST(self):  # noqa: N802
@@ -196,13 +233,9 @@ def test_impuesto_que_solo_admite_retencion_usa_el_tipo_de_arca(pestana, servido
 
 
 def test_sin_resultados_devuelve_lista_vacia(pestana, servidor, tmp_path):
-    FILAS["999"] = []
+    # Como el 216 en ARCA el 2026-11-11: "No se han encontrado datos para esta consulta...".
     pestana.goto(servidor)
-    pestana.evaluate(
-        "() => { const o = document.createElement('option'); o.value = '999'; o.text = '999';"
-        " document.querySelector('#impuestos').appendChild(o); }"
-    )
-    assert misret.consultar_impuesto(pestana, servidor, _consulta(), "999", tmp_path, pestana.avisos) == []
+    assert misret.consultar_impuesto(pestana, servidor, _consulta(), "216", tmp_path, pestana.avisos) == []
 
 
 def test_el_alert_de_arca_llega_como_error(pestana, servidor, tmp_path):
@@ -265,3 +298,32 @@ def test_sin_el_recuadro_del_nombre_el_formulario_sigue_sirviendo(pestana, servi
     pestana.evaluate("() => document.getElementById('denominacionDiv').remove()")
     formulario = misret.leer_formulario(pestana)
     assert formulario["denominaciones"] == {} and formulario["cuits"] == ["20235102162", "30710809883"]
+
+
+def test_el_combinado_solo_se_ofrece_para_217_y_767(pestana, servidor):
+    pestana.goto(servidor)
+    tipos = {i["codigo"]: i["tipos"] for i in misret.leer_formulario(pestana)["impuestos"]}
+    assert "RetencionPercepcion" in tipos["217"]
+    # ARCA muestra el radio combinado para el 219 pero lo rechaza al enviar.
+    assert tipos["219"] == ["Retencion", "Percepcion"]
+
+
+def test_combinado_fuera_de_217_y_767_se_pide_por_separado(pestana, servidor, tmp_path):
+    pestana.goto(servidor)
+    _Arca.recibidos.clear()
+    filas = misret.consultar_impuesto(pestana, servidor, _consulta(), "219", tmp_path, pestana.avisos)
+    assert [r["retencionPercepcion"] for r in _Arca.recibidos] == [["Retencion"], ["Percepcion"]]
+    assert sorted(f["importe"] for f in filas) == [250.0, 500.0]
+
+
+def test_sesion_vencida_de_mis_retenciones_se_reconoce(pestana, servidor, tmp_path):
+    """seti vencido no muestra el login: contesta 401 MISSING_AUTHENTICATION_INFO."""
+    _Arca.vencida = True
+    try:
+        with pytest.raises(misret.SesionVencida):
+            misret.consultar_impuesto(pestana, servidor, _consulta(), "217", tmp_path, pestana.avisos)
+    finally:
+        _Arca.vencida = False
+    assert misret.es_sesion_vencida(SESION_VENCIDA.encode("latin-1"))
+    assert misret.es_sesion_vencida(b"", status=401)
+    assert not misret.es_sesion_vencida(FORMULARIO)

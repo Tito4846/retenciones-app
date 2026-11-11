@@ -664,15 +664,25 @@ class NavegadorArca:
                 # La clave queda en este hilo (no en el objeto) para renovar la sesion.
                 clave = sobre_clave.pop()
                 doble_factor = _login(pagina, cuit, clave, lambda m: self._fijar(CONECTANDO, m))
+                # El portal en el que quedo la ventana: al que se le avisa que seguimos.
+                url_portal = pagina.url if "/portal/" in (pagina.url or "") else settings.ARCA_URL_PORTAL
                 pestana = self._abrir_servicio(contexto, pagina, CONECTANDO)
                 self._fijar(CONECTADO, MENSAJE_CONECTADO if self._formulario else MENSAJE_SIN_FORMULARIO)
 
+                def avisar_al_portal() -> bool:
+                    return self._avisar_al_portal(contexto, url_portal)
+
                 def renovar(pestana_vieja: Any, motivo: str) -> Any | None:
                     nonlocal pagina
-                    pestana_nueva, pagina = self._renovar(contexto, pagina, pestana_vieja, cuit, clave, motivo)
+                    # Primero con las cookies (sin clave ni doble factor); si el
+                    # portal tambien vencio, el ingreso completo.
+                    pestana_nueva = self._reabrir_con_cookies(contexto, pagina, pestana_vieja, url_portal, motivo)
+                    if pestana_nueva is None:
+                        pestana_nueva, pagina = self._renovar(contexto, pagina, pestana_vieja, cuit, clave, motivo)
                     return pestana_nueva
 
-                self._atender(contexto, pestana, descargas, renovar, anticipar=not doble_factor)
+                self._atender(contexto, pestana, descargas, renovar, anticipar=not doble_factor,
+                              avisar_al_portal=avisar_al_portal)
         except BaseException as error:  # noqa: BLE001 - Chrome o ARCA pueden fallar de mil formas
             sobre_clave.clear()
             if isinstance(error, ErrorArca):
@@ -702,6 +712,68 @@ class NavegadorArca:
         self._fijar(estado, "Leyendo las CUIT y sus nombres…")
         self._leer_formulario(pestana)
         return pestana
+
+    def _avisar_al_portal(self, contexto: Any, url_portal: str) -> bool:
+        """
+        El "ping" al portal de ARCA: pide su pagina con las cookies de la
+        ventana (contexto.request las comparte; la pestana no se mueve) para que
+        ARCA no cierre la sesion por inactividad (~15 min). False si ARCA ya
+        devolvio el ingreso: la sesion del portal vencio.
+        """
+        try:
+            respuesta = contexto.request.get(url_portal, timeout=30000)
+        except Exception as error:  # noqa: BLE001 - un corte de red no es una sesion vencida
+            if es_cierre(error):
+                raise
+            logger.info("ARCA: no se pudo avisar al portal: %s", error)
+            return True
+        vencida = misret.es_sesion_vencida(respuesta.body(), respuesta.status) or "auth.afip.gob.ar" in (respuesta.url or "")
+        logger.info("ARCA: aviso al portal (HTTP %s)%s", respuesta.status, " -> sesion vencida" if vencida else "")
+        return not vencida
+
+    def _reabrir_con_cookies(
+        self, contexto: Any, pagina: Any, pestana_vieja: Any, url_portal: str, motivo: str
+    ) -> Any | None:
+        """
+        Vuelve a abrir Mis Retenciones desde el portal con las cookies que ya
+        tiene la ventana, sin escribir la clave (y sin doble factor). Sirve
+        cuando vencio la sesion del servicio pero la del portal sigue viva.
+        None si el portal tambien vencio o no se pudo: queda el ingreso completo.
+        """
+        with self._candado:
+            self._renovando = True
+        self._fijar(CONECTADO, f"{motivo}: volviendo a abrir Mis Retenciones con la sesión del portal…")
+        try:
+            if pagina.is_closed():
+                return None  # sin la pestana del portal: el ingreso completo abre una
+            pagina.goto(url_portal, timeout=settings.TIMEOUT_NAVEGACION_MS)
+            try:
+                pagina.wait_for_selector(settings.ARCA_SEL_BUSCADOR, timeout=settings.TIMEOUT_NAVEGACION_MS)
+            except Exception:  # noqa: BLE001 - sin buscador: el portal pidio ingresar de nuevo
+                logger.info("ARCA: el portal tambien vencio, hace falta el ingreso completo")
+                return None
+            with self._candado:
+                self._formulario = self._url_formulario = None
+            pestana = self._abrir_servicio(contexto, pagina, CONECTADO)
+            if pestana_vieja not in (pestana, pagina) and not pestana_vieja.is_closed():
+                pestana_vieja.close()
+            if settings.MINIMIZAR_VENTANA and not settings.HEADLESS and self._formulario:
+                minimizar_ventana(contexto, pestana)
+            self._fijar(
+                CONECTADO,
+                "Sesión de ARCA recuperada con las cookies. "
+                + (MENSAJE_CONECTADO if self._formulario else MENSAJE_SIN_FORMULARIO),
+            )
+            logger.info("ARCA: sesion recuperada con las cookies (sin clave)")
+            return pestana
+        except Exception as error:  # noqa: BLE001 - queda el ingreso completo
+            if es_cierre(error):
+                raise
+            logger.info("ARCA: no se pudo reabrir con las cookies (%s): se entra de nuevo", error)
+            return None
+        finally:
+            with self._candado:
+                self._renovando = False
 
     def _renovar(
         self, contexto: Any, pagina: Any, pestana_vieja: Any, cuit: str, clave: str, motivo: str
@@ -771,12 +843,15 @@ class NavegadorArca:
         descargas: list[Any],
         renovar: Callable[[Any, str], Any | None] | None = None,
         anticipar: bool = False,
+        avisar_al_portal: Callable[[], bool] | None = None,
     ) -> None:
         """
         Atiende los pedidos de la API y cuida la sesion. `renovar(pestana,
         motivo)` vuelve a entrar con los mismos datos y devuelve la pestana nueva
         (None si no se pudo). `anticipar`: renovar antes de que venza, al cumplir
         ARCA_RENOVAR_SESION_MIN (no si el ingreso pidio doble factor).
+        `avisar_al_portal()`: el aviso cada ARCA_MANTENER_PORTAL_MIN para que
+        ARCA no cierre el portal por inactividad; False si ya lo cerro.
         """
         # Sin formulario la ventana queda a la vista: la persona tiene que tocar
         # "click aqui" para llegar a la version anterior.
@@ -788,6 +863,8 @@ class NavegadorArca:
         sesion_desde = time.monotonic()
         renovar_cada = settings.ARCA_RENOVAR_SESION_MIN * 60
         proxima_busqueda = time.monotonic()
+        avisar_portal_cada = settings.ARCA_MANTENER_PORTAL_MIN * 60
+        ultimo_aviso_portal = time.monotonic()
 
         def renovada(motivo: str) -> bool:
             nonlocal pestana, sesion_desde, ultimo_uso, buscar_formulario
@@ -812,6 +889,10 @@ class NavegadorArca:
                 if encontrada is not None:
                     pestana, buscar_formulario = encontrada, False
                     self._fijar(CONECTADO, MENSAJE_CONECTADO)
+            if avisar_al_portal and avisar_portal_cada > 0 and time.monotonic() - ultimo_aviso_portal > avisar_portal_cada:
+                ultimo_aviso_portal = time.monotonic()
+                if not avisar_al_portal() and not renovada("ARCA cerró la sesión del portal"):
+                    return
             if time.monotonic() - ultimo_uso > MANTENER_VIVA_S:
                 ultimo_uso = time.monotonic()
                 if not self._mantener_viva(contexto, pestana) and not renovada("ARCA venció la sesión"):
@@ -840,7 +921,16 @@ class NavegadorArca:
             ultimo_uso = ultimo_pedido = time.monotonic()
             if futuro.set_running_or_notify_cancel():
                 try:
-                    futuro.set_result(fn(pestana, contexto))
+                    try:
+                        resultado = fn(pestana, contexto)
+                    except misret.SesionVencida:
+                        # Vencio a mitad del pedido: se renueva (con las cookies
+                        # del portal si se puede) y se repite una vez.
+                        if not renovada("ARCA venció la sesión de Mis Retenciones"):
+                            raise ArcaDesconectado("ARCA venció la sesión y no se pudo volver a entrar solo.") from None
+                        ultimo_uso = ultimo_pedido = time.monotonic()
+                        resultado = fn(pestana, contexto)
+                    futuro.set_result(resultado)
                 except BaseException as error:  # noqa: BLE001 - viaja al hilo que pidio
                     futuro.set_exception(error)
                     if es_cierre(error):
@@ -886,7 +976,10 @@ class NavegadorArca:
         """Pide la pagina con las cookies de la ventana; False si ARCA devolvio el login."""
         try:
             respuesta = contexto.request.get(pestana.url, timeout=30000)
-            return _MARCA_LOGIN not in respuesta.text()
+            # Bytes y no .text(): ARCA responde en Latin-1 y .text() decodifica
+            # como UTF-8, falla con la primera tilde y la sesion no se renovaba.
+            # Mis Retenciones vencida no muestra el login: contesta 401.
+            return not misret.es_sesion_vencida(respuesta.body(), respuesta.status)
         except Exception as error:  # noqa: BLE001
             if es_cierre(error):
                 raise

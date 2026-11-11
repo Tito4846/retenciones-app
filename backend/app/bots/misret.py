@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import logging
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
 from typing import Any, Callable
@@ -59,13 +59,38 @@ TEXTOS_EXPORTAR = ("CSV", "Excel", "XLS")
 TEXTOS_SIGUIENTE = ("Siguiente", "Próxima", "Próximo", ">")
 MAX_PAGINAS = 100
 # Mensajes de "no hay nada" en la pagina de resultados.
-SIN_RESULTADOS = ("no se encontraron", "no existen", "no hay retenciones", "sin resultados", "nothing found")
+# ARCA real (2026-11): "No se han encontrado datos para esta consulta o los
+# parametros ingresados corresponden a retenciones /percepciones con importe en cero".
+SIN_RESULTADOS = ("no se han encontrado", "no se encontraron", "no existen", "no hay retenciones", "sin resultados", "nothing found")
 # Cuanto se espera a que ARCA conteste el nombre de una CUIT.
 ESPERA_NOMBRE_MS = 4000
 
 
+# Lo que devuelve seti cuando vencio la sesion de Mis Retenciones (visto el
+# 2026-11-11): no el login de ARCA sino un error del JBoss,
+#   "HTTP Status 401 - MISSING_AUTHENTICATION_INFO ... This request requires HTTP authentication".
+# Mientras tanto el portal puede seguir logueado: se recupera con sus cookies.
+MARCAS_SESION_VENCIDA = ("MISSING_AUTHENTICATION_INFO", "HTTP Status 401", "F1:username")
+
+
+def es_sesion_vencida(contenido: str | bytes, status: int | None = None) -> bool:
+    """Si una respuesta (o el HTML de la pestana) es la de una sesion vencida de ARCA."""
+    if status in (401, 403):
+        return True
+    if isinstance(contenido, bytes):
+        return any(m.encode() in contenido for m in MARCAS_SESION_VENCIDA)
+    return any(m in contenido for m in MARCAS_SESION_VENCIDA)
+
+
 class ErrorConsulta(RuntimeError):
     """La consulta no se pudo hacer. El mensaje es para la pantalla."""
+
+
+class SesionVencida(ErrorConsulta):
+    """Mis Retenciones contesto que la sesion vencio: hay que renovarla y reintentar."""
+
+    def __init__(self) -> None:
+        super().__init__("ARCA venció la sesión de Mis Retenciones.")
 
 
 @dataclass
@@ -161,7 +186,10 @@ def _tipos_por_impuesto(pestana: Any, codigos: list[str]) -> dict[str, list[str]
     except Exception as error:  # noqa: BLE001 - sin esto la pantalla ofrece los tres
         logger.warning("No se pudieron leer los tipos de cada impuesto en ARCA: %s", error)
         return {}
-    return {codigo: [t for t in TIPOS if t in valores] for codigo, valores in tipos.items()}
+    return {
+        codigo: [t for t in TIPOS if t in valores and (t != "RetencionPercepcion" or admite_combinado(codigo))]
+        for codigo, valores in tipos.items()
+    }
 
 
 def impuestos_a_consultar(opciones: list[dict], detectados: set[str] | None = None) -> list[str]:
@@ -208,6 +236,15 @@ def _completar(pestana: Any, consulta: ConsultaArca, impuesto: str) -> None:
 # Si el tipo pedido no corresponde al impuesto, el primero de estos que ARCA muestre.
 _TIPOS_POR_PREFERENCIA = ("RetencionPercepcion", "Retencion", "Percepcion")
 
+# ARCA muestra el radio "Retencion y/o Percepcion" para mas impuestos, pero al
+# enviar lo rechaza: "No se puede seleccionar 'Retencion y/o Percepcion' para
+# impuesto distinto a 217 y 767" (probado el 2026-11-11 con el 219 y el 787).
+COMBINADO_ADMITIDO = frozenset({"217", "767"})
+
+
+def admite_combinado(impuesto: str) -> bool:
+    return impuesto in COMBINADO_ADMITIDO
+
 
 def _tipo_para(pestana: Any, pedido: str, impuesto: str) -> str:
     """
@@ -216,7 +253,10 @@ def _tipo_para(pestana: Any, pedido: str, impuesto: str) -> str:
     pedido esta oculto se usa, como en ARCA, el que el formulario dejo
     marcado o, si no, el primero a la vista (el combinado antes que el resto).
     """
-    visibles = [t for t in _TIPOS_POR_PREFERENCIA if pestana.locator(SEL_TIPO.format(t)).is_visible()]
+    visibles = [
+        t for t in _TIPOS_POR_PREFERENCIA
+        if (t != "RetencionPercepcion" or admite_combinado(impuesto)) and pestana.locator(SEL_TIPO.format(t)).is_visible()
+    ]
     if pedido in visibles or not visibles:
         return pedido
     marcado = next((t for t in visibles if pestana.locator(SEL_TIPO.format(t)).is_checked()), None)
@@ -318,12 +358,52 @@ def consultar_impuesto(pestana: Any, url_formulario: str, consulta: ConsultaArca
                        carpeta: Path, avisos: list[str],
                        cancelada: Callable[[], bool] = nunca_cancelada) -> list[dict]:
     """La consulta de un impuesto. Devuelve las retenciones ya leidas."""
-    if "getForm" not in (pestana.url or ""):
-        pestana.goto(url_formulario)
+    if consulta.tipo == "RetencionPercepcion" and not admite_combinado(impuesto):
+        # ARCA no deja pedir las dos juntas para este impuesto: se piden por
+        # separado (las que el formulario admita) y se juntan.
+        separados = [t for t in ("Retencion", "Percepcion") if t in tipos_admitidos(pestana, url_formulario, impuesto)]
+        retenciones: list[dict] = []
+        for tipo in separados:
+            retenciones += _consultar_una(pestana, url_formulario, replace(consulta, tipo=tipo),
+                                          impuesto, carpeta, avisos, cancelada)
+        if separados:
+            return retenciones
+    return _consultar_una(pestana, url_formulario, consulta, impuesto, carpeta, avisos, cancelada)
+
+
+def _ir_al_formulario(pestana: Any, url_formulario: str) -> None:
+    """
+    Carga el formulario de nuevo (asi una sesion vencida se nota antes de
+    completar nada) y verifica que ARCA no haya contestado el 401 de sesion
+    vencida. SesionVencida si lo contesto.
+    """
+    pestana.goto(url_formulario)
+    _verificar_sesion(pestana)
     pestana.wait_for_selector(SEL_FORM)
+
+
+def _verificar_sesion(pestana: Any) -> None:
+    try:
+        contenido = pestana.content()
+    except Exception:  # noqa: BLE001 - la pagina se esta reemplazando: lo vera el paso siguiente
+        return
+    if es_sesion_vencida(contenido):
+        raise SesionVencida()
+
+
+def tipos_admitidos(pestana: Any, url_formulario: str, impuesto: str) -> list[str]:
+    """Los tipos que el formulario muestra para el impuesto (combinado solo si ARCA lo acepta)."""
+    _ir_al_formulario(pestana, url_formulario)
+    return _tipos_por_impuesto(pestana, [impuesto]).get(impuesto, [])
+
+
+def _consultar_una(pestana: Any, url_formulario: str, consulta: ConsultaArca, impuesto: str,
+                   carpeta: Path, avisos: list[str], cancelada: Callable[[], bool]) -> list[dict]:
+    _ir_al_formulario(pestana, url_formulario)
     _completar(pestana, consulta, impuesto)
 
     _enviar(pestana, avisos, impuesto, cancelada=cancelada)
+    _verificar_sesion(pestana)  # vencio entre que se cargo el formulario y se envio
 
     ruta = _exportar(pestana, carpeta)
     if ruta is None:

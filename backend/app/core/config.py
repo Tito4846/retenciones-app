@@ -93,6 +93,13 @@ class Settings(BaseSettings):
     # Si el ingreso pidio doble factor no se renueva antes: lo tendria que
     # completar la persona cada vez.
     ARCA_RENOVAR_SESION_MIN: int = 50
+    # ARCA cierra el portal a los ~15 minutos sin actividad. Cada estos minutos
+    # el bot le pide la pagina del portal con las cookies de la ventana (sin
+    # moverla) para que no lo cierre. 0 = no avisar.
+    ARCA_MANTENER_PORTAL_MIN: int = 9
+    # El portal al que se le avisa. El bot usa el que quedo en la ventana
+    # despues del ingreso; este es el respaldo (el visto el 2026-11-11).
+    ARCA_URL_PORTAL: str = "https://portalcf.cloud.afip.gob.ar/portal/app/"
     TIMEOUT_LOGIN_MS: int = 30000
     TIMEOUT_NAVEGACION_MS: int = 15000
     # Si el servicio no aparece en este tiempo, la cuenta no esta adherida.

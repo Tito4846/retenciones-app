@@ -58,6 +58,16 @@ export class LotesStore {
     });
   }
 
+  /**
+   * Si el lote va en «Mis Tareas»: lo que ya es tuyo para mover. Un lote
+   * enviado que todavía no tomó nadie no es de nadie: queda en «Esperando
+   * Revisión» también para el supervisor, hasta que lo toma (ahí pasa a sus
+   * tareas). `esperaA` igual lo cuenta, para avisarle que hay algo nuevo.
+   */
+  enMisTareas(l: LoteListado, usuarioId: string): boolean {
+    return l.estado !== 'pendiente' && this.esperaA(l, usuarioId);
+  }
+
   esperaA(l: LoteListado, usuarioId: string): boolean {
     if (this.sesion.puedePreparar() && l.maker_id === usuarioId && (l.estado === 'borrador' || l.estado === 'rechazado')) return true;
     if (this.sesion.esSupervisor()) {
