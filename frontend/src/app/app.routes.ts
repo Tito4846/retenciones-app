@@ -1,5 +1,5 @@
 import { Routes } from '@angular/router';
-import { conSesion, gestionaUsuarios, sinSesion, soloSupervisor } from './core/services/guardias';
+import { conSesion, gestionaUsuarios, sinSesion } from './core/services/guardias';
 
 export const routes: Routes = [
   {
@@ -26,8 +26,9 @@ export const routes: Routes = [
         loadComponent: () => import('./features/conciliacion/conciliacion').then((m) => m.Conciliacion),
       },
       {
+        // Las dos perspectivas en la misma pantalla: el empleado ve sus lotes para
+        // verificar y enviar; el supervisor, las solicitudes de revisión de todos.
         path: 'revision',
-        canActivate: [soloSupervisor],
         loadComponent: () => import('./features/revision/revision').then((m) => m.RevisionPantalla),
       },
       {

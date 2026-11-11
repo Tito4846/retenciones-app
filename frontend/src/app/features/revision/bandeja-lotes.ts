@@ -21,8 +21,8 @@ const PESTANAS: { id: Bandeja; titulo: string }[] = [
   template: `
     <div class="space-y-2 border-b border-line p-3">
       <div class="flex items-baseline justify-between gap-2 px-1">
-        <h2 class="text-sm font-semibold">Solicitudes de revisión</h2>
-        @if (nuevas()) {
+        <h2 class="text-sm font-semibold">{{ supervisor() ? 'Solicitudes de revisión' : 'Mis lotes' }}</h2>
+        @if (supervisor() && nuevas()) {
           <span class="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900 tabular-nums">{{ nuevas() }} {{ nuevas() === 1 ? 'nueva' : 'nuevas' }}</span>
         }
       </div>
@@ -114,6 +114,7 @@ export class BandejaLotes {
   protected readonly bandeja = computed<Bandeja>(() => this.elegida() ?? (this.store.paraMi() ? 'mias' : 'espera'));
   protected readonly busqueda = signal('');
   protected readonly yo = computed(() => this.sesion.usuario()?.id ?? '');
+  protected readonly supervisor = this.sesion.esSupervisor;
 
   protected readonly cantidades = computed(() => {
     const cuenta = { mias: 0, espera: 0, cerrados: 0 };

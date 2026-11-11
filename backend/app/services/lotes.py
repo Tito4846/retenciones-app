@@ -992,6 +992,19 @@ def puede_ver(usuario: Usuario, lote: dict) -> bool:
         mismo(autor) for autor in lote.get("autores", []))
 
 
+def exigir_acceso(usuario: Usuario, lote_id: str) -> None:
+    """
+    Todo lo que cuelga de /lotes/{id} (detalle, Excel, adjuntos, envío, historial…)
+    pasa por acá: un empleado no puede leer ni tocar el lote de otro aunque sepa su id.
+    """
+    if usuario.tiene("supervisor"):
+        return
+    with transaccion(escritura=False) as c:
+        lote = _lote(c, lote_id)
+        if not puede_ver(usuario, {**lote, "autores": _autores(c, lote)}):
+            raise _prohibido("No podés ver este lote: lo preparó otra persona.")
+
+
 def detalle(lote_id: str) -> dict:
     with transaccion(escritura=False) as c:
         return _detalle(c, lote_id)
@@ -1081,6 +1094,10 @@ def notificaciones(usuario: Usuario) -> list[dict]:
 
 
 def marcar_leida(usuario: Usuario, notificacion_id: str) -> None:
+    # Solo los avisos que le llegan a quien la marca (a su nombre o a su rol).
+    ids = {n["id"] for n in notificaciones(usuario)}
+    if notificacion_id not in ids:
+        return
     with transaccion() as c:
         c.execute("UPDATE notificacion SET leida_utc = ? WHERE id = ? AND leida_utc IS NULL", (ahora_utc(), notificacion_id))
 

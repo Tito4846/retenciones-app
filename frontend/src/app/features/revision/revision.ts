@@ -1,5 +1,6 @@
 import { DatePipe } from '@angular/common';
 import { Component, computed, inject, linkedSignal, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { LotesStore } from '../../core/services/lotes.store';
 import { SesionService } from '../../core/services/sesion.service';
@@ -29,8 +30,17 @@ export class RevisionPantalla {
   protected readonly periodo = periodo;
 
   protected readonly d = this.store.detalle;
-  /** Al llegar recién generado, ya viene elegido. */
-  protected readonly seleccionId = signal<string | null>(inject(ActivatedRoute).snapshot.queryParamMap.get('lote'));
+  private readonly ruta = inject(ActivatedRoute);
+  /** Al llegar recién generado (o desde un aviso), ya viene elegido. */
+  protected readonly seleccionId = signal<string | null>(this.ruta.snapshot.queryParamMap.get('lote'));
+
+  constructor() {
+    // Un aviso del menú con la pantalla ya abierta cambia solo el ?lote=: hay que seguirlo.
+    this.ruta.queryParamMap.pipe(takeUntilDestroyed()).subscribe((q) => {
+      const lote = q.get('lote');
+      if (lote) this.seleccionId.set(lote);
+    });
+  }
   private readonly loteId = computed(() => this.d()?.lote.id ?? null);
 
   /** Comprobantes a la espera de confirmar. */

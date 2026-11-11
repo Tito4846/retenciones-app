@@ -856,3 +856,33 @@ def test_eliminar_se_puede_apagar(ruta_arca, ruta_mayor, monkeypatch):
     r = cliente.delete(base, headers=LUIS)
     assert r.status_code == 403 and r.json()["detail"]["codigo"] == "ELIMINAR_DESACTIVADO"
     assert cliente.get("/api/lotes/catalogo").json()["eliminar_cerrados"] is False
+
+
+def test_un_empleado_solo_ve_y_toca_sus_lotes(ruta_arca, ruta_mayor):
+    lote = _lote(ruta_arca, ruta_mayor)  # lo prepara Ana
+    lote_id = lote["lote"]["id"]
+    base = f"/api/lotes/{lote_id}"
+    beto = {"X-Usuario-Id": "beto", "X-Usuario-Nombre": "Beto", "X-Usuario-Roles": "empleado"}
+
+    # Ana (quien lo preparó) y cualquier supervisor lo ven.
+    assert cliente.get(base, headers=ANA).status_code == 200
+    assert cliente.get(base, headers=LUIS).status_code == 200
+    assert [l["id"] for l in cliente.get("/api/lotes", headers=ANA).json()["lotes"]] == [lote_id]
+
+    # Otro empleado no lo ve en la bandeja ni llega a él por la dirección.
+    assert cliente.get("/api/lotes", headers=beto).json()["lotes"] == []
+    clave = lote["partidas"][0]["clave"]
+    pedidos = [
+        cliente.get(base, headers=beto),
+        cliente.get(base + "/versiones/1/excel", headers=beto),
+        cliente.get(base + "/auditoria", headers=beto),
+        cliente.get(base + "/diff", params={"desde": 1, "hasta": 1}, headers=beto),
+        cliente.patch(f"{base}/partidas/{clave}", json={"version": 1, "comentario": "x"}, headers=beto),
+        cliente.post(base + "/enviar", data={"version": 1}, headers=beto),
+        cliente.post(base + "/anular", json={"motivo": "no es mío pero lo anulo"}, headers=beto),
+    ]
+    assert [r.status_code for r in pedidos] == [403] * len(pedidos)
+    assert cliente.get(base, headers=ANA).json()["lote"]["estado"] == "borrador"
+
+    # Un lote que no existe sigue dando 404, no 403.
+    assert cliente.get("/api/lotes/no-existe", headers=beto).status_code == 404

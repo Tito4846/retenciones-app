@@ -14,7 +14,3 @@ export const sinSesion: CanActivateFn = () => (inject(SesionService).usuario() ?
 /** Usuarios: solo la cuenta principal y quienes ella habilitó. */
 export const gestionaUsuarios: CanActivateFn = () =>
   inject(SesionService).gestionaUsuarios() ? true : inject(Router).createUrlTree(['/']);
-
-/** Revisión y aprobación: solo supervisores. El empleado trabaja en Conciliación. */
-export const soloSupervisor: CanActivateFn = () =>
-  inject(SesionService).esSupervisor() ? true : inject(Router).createUrlTree(['/']);
