@@ -2,8 +2,10 @@ import io
 from urllib.parse import unquote
 
 import openpyxl
+import pytest
 from fastapi.testclient import TestClient
 
+from app.core.config import settings
 from app.main import app
 
 cliente = TestClient(app)
@@ -186,26 +188,112 @@ def test_emparejar_conciliacion_inexistente():
 
 
 # ----------------------------------------------------------------------
-# Usuario: lo manda la página principal (encabezados X-Usuario-*)
+# Usuario: niveles de acceso de ContadorWeb
 # ----------------------------------------------------------------------
 
+USUARIO_CW = {"X-Usuario-Id": "u-42", "X-Usuario-Nombre": "Ana%20P%C3%A9rez", "X-Usuario-Nivel": "10",
+              "X-Usuario-Modulos": "Impuestos/Retenciones"}
 
-def test_yo_con_los_encabezados_de_la_pagina_principal():
-    r = cliente.get("/api/yo", headers={"X-Usuario-Id": "u-42", "X-Usuario-Nombre": "Ana%20P%C3%A9rez", "X-Usuario-Roles": "empleado, supervisor"})
+
+def test_yo_en_modo_local_con_nivel_y_modulos_de_contadorweb():
+    r = cliente.get("/api/yo", headers=USUARIO_CW)
     assert r.status_code == 200
-    assert r.json() == {"id": "u-42", "nombre": "Ana Pérez", "roles": ["empleado", "supervisor"]}
+    assert r.json() == {"id": "u-42", "nombre": "Ana Pérez", "roles": ["empleado"], "nivel": "10",
+                        "nivel_nombre": "Usuario", "estudio_nombre": "", "conectado": False}
 
 
 def test_yo_sin_encabezados_es_el_usuario_por_defecto():
-    assert cliente.get("/api/yo").json() == {"id": "tester", "nombre": "tester", "roles": ["supervisor"]}
+    datos = cliente.get("/api/yo").json()
+    assert (datos["id"], datos["roles"], datos["nivel_nombre"]) == ("tester", ["supervisor"], "Administrador")
 
 
-def test_sin_un_rol_valido_no_entra():
-    r = cliente.get("/api/yo", headers={"X-Usuario-Id": "u-1", "X-Usuario-Roles": "admin"})
+@pytest.mark.parametrize("nivel, modulos, roles", [
+    ("200", "", ["supervisor"]),
+    ("100", "", ["supervisor"]),
+    ("30", "*", ["supervisor"]),
+    ("30", "Impuestos/Retenciones%20-%20Supervisi%C3%B3n", ["supervisor"]),
+    ("10", "Contabilidad/Conciliaci%C3%B3n%20Bancaria,Impuestos/Retenciones", ["empleado"]),
+])
+def test_niveles_de_contadorweb_a_roles(nivel, modulos, roles):
+    r = cliente.get("/api/yo", headers={"X-Usuario-Id": "x", "X-Usuario-Nivel": nivel, "X-Usuario-Modulos": modulos})
+    assert r.json()["roles"] == roles
+
+
+def test_sin_el_modulo_de_retenciones_no_entra():
+    r = cliente.get("/api/yo", headers={"X-Usuario-Id": "u-1", "X-Usuario-Nivel": "10",
+                                        "X-Usuario-Modulos": "Contabilidad/Conciliaci%C3%B3n%20Bancaria"})
     assert r.status_code == 403
     assert r.json()["detail"]["codigo"] == "SIN_ROL"
     # Las demás rutas también lo frenan.
-    assert cliente.get("/api/conexiones", headers={"X-Usuario-Id": "u-1", "X-Usuario-Roles": ""}).status_code == 403
+    assert cliente.get("/api/conexiones", headers={"X-Usuario-Id": "u-1", "X-Usuario-Nivel": "10"}).status_code == 403
+
+
+# --- Conectado a ContadorWeb: pase firmado -> token de sesión -------------------
+
+SECRETO = "s" * 40
+
+
+def _pase(**cambios) -> str:
+    import secrets
+    import time
+
+    from app.core.usuarios import firmar
+
+    datos = {"u": "Carlos", "n": "Piccinini Carlos", "nivel": 200, "nivel_nombre": "Administrador General",
+             "config": True, "modulos": ["*"], "general": True, "estudio": "piccinini",
+             "estudio_nombre": "PICCININI Y ASOCIADOS S.A.", "exp": int(time.time()) + 120, "id": secrets.token_urlsafe(8)}
+    datos.update(cambios)
+    return firmar(datos, SECRETO.encode())
+
+
+@pytest.fixture
+def conectado(monkeypatch):
+    monkeypatch.setattr(settings, "RETENCIONES_MODULO_SECRETO", SECRETO)
+
+
+def test_conectado_el_pase_abre_una_sesion(conectado):
+    r = cliente.post("/api/sesion/entrar", json={"pase": _pase()})
+    assert r.status_code == 200
+    token = r.json()["token"]
+    yo = cliente.get("/api/yo", headers={"Authorization": f"Bearer {token}"}).json()
+    assert yo == {"id": "carlos", "nombre": "Piccinini Carlos", "roles": ["supervisor"], "nivel": "200",
+                  "nivel_nombre": "Administrador General", "estudio_nombre": "PICCININI Y ASOCIADOS S.A.",
+                  "conectado": True}
+
+
+def test_conectado_un_usuario_con_el_modulo_es_empleado(conectado):
+    pase = _pase(u="ana", nivel=10, nivel_nombre="Usuario", config=False, general=False,
+                 modulos=["Impuestos/Retenciones"])
+    token = cliente.post("/api/sesion/entrar", json={"pase": pase}).json()["token"]
+    assert cliente.get("/api/yo", headers={"Authorization": f"Bearer {token}"}).json()["roles"] == ["empleado"]
+
+
+def test_conectado_sin_el_modulo_no_entra(conectado):
+    pase = _pase(u="ana", nivel=10, config=False, general=False, modulos=["Contabilidad/Conciliación Bancaria"])
+    r = cliente.post("/api/sesion/entrar", json={"pase": pase})
+    assert r.status_code == 403 and r.json()["detail"]["codigo"] == "SIN_ROL"
+
+
+def test_conectado_el_pase_es_de_un_solo_uso_y_firmado(conectado):
+    pase = _pase()
+    assert cliente.post("/api/sesion/entrar", json={"pase": pase}).status_code == 200
+    assert cliente.post("/api/sesion/entrar", json={"pase": pase}).status_code == 401
+    cuerpo, _ = _pase().split(".")
+    assert cliente.post("/api/sesion/entrar", json={"pase": cuerpo + ".firmaFalsa"}).status_code == 401
+    import time
+    assert cliente.post("/api/sesion/entrar", json={"pase": _pase(exp=int(time.time()) - 1)}).status_code == 401
+
+
+def test_conectado_se_ignoran_los_encabezados_de_prueba(conectado):
+    # Sin token no entra nadie, aunque mande X-Usuario-* de administrador.
+    r = cliente.get("/api/yo", headers={"X-Usuario-Id": "x", "X-Usuario-Nivel": "200"})
+    assert r.status_code == 401 and r.json()["detail"]["codigo"] == "SIN_SESION"
+    # El pase no sirve como token.
+    assert cliente.get("/api/yo", headers={"Authorization": f"Bearer {_pase()}"}).status_code == 401
+
+
+def test_sin_secreto_no_se_puede_canjear_un_pase():
+    assert cliente.post("/api/sesion/entrar", json={"pase": "a.b"}).status_code == 503
 
 
 def test_no_hay_rutas_de_ingreso():

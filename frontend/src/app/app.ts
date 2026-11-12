@@ -26,8 +26,10 @@ export class App {
   protected readonly sesion = inject(SesionService);
   protected readonly usuariosDePrueba = USUARIOS_DE_PRUEBA;
 
+  /** «Administrador · Supervisor»: el nivel de ContadorWeb y el rol que le da acá. */
   protected rolesDe(u: Usuario): string {
-    return u.roles.map((r) => (r === 'supervisor' ? 'Supervisor' : 'Empleado')).join(' · ') || 'Sin rol';
+    const roles = u.roles.map((r) => (r === 'supervisor' ? 'Supervisor' : 'Empleado')).join(' · ') || 'Sin rol';
+    return u.nivel_nombre ? `${u.nivel_nombre} · ${roles}` : roles;
   }
 
   /** Menú plegado (solo íconos). Se recuerda en este navegador. */

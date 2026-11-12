@@ -7,12 +7,15 @@ from app.core.config import settings
 @pytest.fixture(autouse=True)
 def usuario_por_defecto(monkeypatch):
     """
-    El usuario sale de los encabezados X-Usuario-* (como lo va a mandar la página
-    principal). Sin ellos, el de la configuración: en los tests, un supervisor «tester».
+    Modo local (sin RETENCIONES_MODULO_SECRETO): el usuario sale de los encabezados
+    X-Usuario-* y, sin ellos, el de la configuración: en los tests, un Administrador
+    (nivel 100 de ContadorWeb, supervisor) «tester».
     """
+    monkeypatch.setattr(settings, "RETENCIONES_MODULO_SECRETO", "")
     monkeypatch.setattr(settings, "USUARIO_POR_DEFECTO_ID", "tester")
     monkeypatch.setattr(settings, "USUARIO_POR_DEFECTO_NOMBRE", "tester")
-    monkeypatch.setattr(settings, "USUARIO_POR_DEFECTO_ROLES", "supervisor")
+    monkeypatch.setattr(settings, "USUARIO_POR_DEFECTO_NIVEL", "100")
+    monkeypatch.setattr(settings, "USUARIO_POR_DEFECTO_MODULOS", "")
 
 ARCA_CSV = """Mis Retenciones - Período 10/2026
 CUIT Agente Ret./Perc.;Denominación;Impuesto;Descripción Impuesto;Régimen;Fecha Ret./Perc.;Número Certificado;Importe Ret./Perc.

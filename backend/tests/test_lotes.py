@@ -12,11 +12,11 @@ from app.services import partidas as P
 from tests.conftest import ARCA_CSV
 from tests.test_api import _subir, cliente
 
-ANA = {"X-Usuario-Id": "ana", "X-Usuario-Nombre": "Ana", "X-Usuario-Roles": "empleado"}
-LUIS = {"X-Usuario-Id": "luis", "X-Usuario-Nombre": "Luis", "X-Usuario-Roles": "supervisor"}
+ANA = {"X-Usuario-Id": "ana", "X-Usuario-Nombre": "Ana", "X-Usuario-Nivel": "10", "X-Usuario-Modulos": "Impuestos/Retenciones"}
+LUIS = {"X-Usuario-Id": "luis", "X-Usuario-Nombre": "Luis", "X-Usuario-Nivel": "100"}
 # Supervisora que preparó el lote: igual no lo puede revisar.
-EVA = {"X-Usuario-Id": "eva", "X-Usuario-Nombre": "Eva", "X-Usuario-Roles": "supervisor"}
-ADMIN = {"X-Usuario-Id": "root", "X-Usuario-Nombre": "Admin", "X-Usuario-Roles": "supervisor"}
+EVA = {"X-Usuario-Id": "eva", "X-Usuario-Nombre": "Eva", "X-Usuario-Nivel": "100"}
+ADMIN = {"X-Usuario-Id": "root", "X-Usuario-Nombre": "Admin", "X-Usuario-Nivel": "100"}
 
 
 @pytest.fixture(autouse=True)
@@ -51,7 +51,7 @@ def _justificar_todo(lote: dict, quien=ANA) -> dict:
 
 def test_sin_rol_no_entra_a_los_lotes():
     for ruta in ("/api/lotes", "/api/conexiones", "/api/estado/x"):
-        r = cliente.get(ruta, headers={"X-Usuario-Id": "ana", "X-Usuario-Roles": "invitado"})
+        r = cliente.get(ruta, headers={"X-Usuario-Id": "ana", "X-Usuario-Nivel": "10"})
         assert r.status_code == 403 and r.json()["detail"]["codigo"] == "SIN_ROL", ruta
 
 
@@ -323,7 +323,7 @@ def test_migra_la_bandeja_anterior(tmp_path):
 
 
 def test_supervisor_se_pasa_un_lote_tomado_por_otro(ruta_arca, ruta_mayor):
-    jefa = {"X-Usuario-Id": "jefa", "X-Usuario-Nombre": "Jefa", "X-Usuario-Roles": "supervisor"}
+    jefa = {"X-Usuario-Id": "jefa", "X-Usuario-Nombre": "Jefa", "X-Usuario-Nivel": "100"}
     lote = _justificar_todo(_lote(ruta_arca, ruta_mayor))
     base = f"/api/lotes/{lote['lote']['id']}"
     cliente.post(base + "/enviar", data={"version": 1}, headers=ANA)
@@ -858,7 +858,7 @@ def test_un_empleado_solo_ve_y_toca_sus_lotes(ruta_arca, ruta_mayor):
     lote = _lote(ruta_arca, ruta_mayor)  # lo prepara Ana
     lote_id = lote["lote"]["id"]
     base = f"/api/lotes/{lote_id}"
-    beto = {"X-Usuario-Id": "beto", "X-Usuario-Nombre": "Beto", "X-Usuario-Roles": "empleado"}
+    beto = {"X-Usuario-Id": "beto", "X-Usuario-Nombre": "Beto", "X-Usuario-Nivel": "10", "X-Usuario-Modulos": "Impuestos/Retenciones"}
 
     # Ana (quien lo preparó) y cualquier supervisor lo ven.
     assert cliente.get(base, headers=ANA).status_code == 200

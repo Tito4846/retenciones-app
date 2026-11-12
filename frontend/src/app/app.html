@@ -138,7 +138,7 @@
       </ul>
     </nav>
 
-    <!-- Quién está usando el módulo: lo va a dar la página principal; mientras, un usuario de prueba -->
+    <!-- Quién está usando el módulo: lo da ContadorWeb; en modo local, un usuario de prueba -->
     @if (sesion.usuario(); as u) {
       <div class="border-t border-line py-4" [class]="plegada() ? 'px-2' : 'px-4'">
         @if (plegada()) {
@@ -153,16 +153,18 @@
               <p class="text-xs text-muted">{{ rolesDe(u) }}</p>
             </div>
           </div>
-          <label class="mt-3 block px-2 text-xs">
-            <span class="font-semibold text-muted">Usuario de prueba</span>
-            <select [value]="sesion.identidadElegida().id" (change)="sesion.cambiar($any($event.target).value)"
-              class="mt-1 w-full rounded-lg border border-line bg-white px-2 py-1.5 text-sm outline-none focus:border-brand-400">
-              @for (p of usuariosDePrueba; track p.id) {
-                <option [value]="p.id" [selected]="p.id === sesion.identidadElegida().id">{{ p.nombre }}</option>
-              }
-            </select>
-            <span class="mt-1 block text-muted">Hasta conectar la página principal, que va a dar el usuario y sus roles.</span>
-          </label>
+          @if (!sesion.conectado()) {
+            <label class="mt-3 block px-2 text-xs">
+              <span class="font-semibold text-muted">Usuario de prueba</span>
+              <select [value]="sesion.identidadElegida().id" (change)="sesion.cambiar($any($event.target).value)"
+                class="mt-1 w-full rounded-lg border border-line bg-white px-2 py-1.5 text-sm outline-none focus:border-brand-400">
+                @for (p of usuariosDePrueba; track p.id) {
+                  <option [value]="p.id" [selected]="p.id === sesion.identidadElegida().id">{{ p.nombre }} ({{ p.nivel }})</option>
+                }
+              </select>
+              <span class="mt-1 block text-muted">Modo local: en producción el usuario y su nivel los da ContadorWeb.</span>
+            </label>
+          }
           @if (lotes.notificaciones().length) {
             @let sinLeer = lotes.notificaciones()[0];
             @if (!sinLeer.leida_utc) {
@@ -185,6 +187,13 @@
 
   <!-- Contenido -->
   <main class="min-w-0 flex-1 px-10 py-10">
-    <router-outlet />
+    @if (sesion.sinSesion(); as motivo) {
+      <div class="mx-auto mt-16 max-w-lg rounded-xl border border-amber-200 bg-amber-50 p-6 text-amber-900" role="alert">
+        <p class="font-semibold">No hay una sesión de ContadorWeb</p>
+        <p class="mt-2 text-sm">{{ motivo }}</p>
+      </div>
+    } @else {
+      <router-outlet />
+    }
   </main>
 </div>

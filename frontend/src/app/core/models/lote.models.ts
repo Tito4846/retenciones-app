@@ -8,6 +8,12 @@ export interface Usuario {
   id: string;
   nombre: string;
   roles: Rol[];
+  /** Nivel de acceso de ContadorWeb: 200 Administrador General, 100 Administrador, 10 Usuario... */
+  nivel?: string;
+  nivel_nombre?: string;
+  estudio_nombre?: string;
+  /** true = la sesión viene de ContadorWeb; false = modo local (usuarios de prueba). */
+  conectado?: boolean;
 }
 
 export interface Lote {

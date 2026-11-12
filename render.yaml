@@ -17,6 +17,9 @@ services:
       sizeGB: 1
     envVars:
       # Se completan a mano en el panel de Render (no quedan en git).
+      # El mismo valor que RETENCIONES_MODULO_SECRETO en el servicio de ContadorWeb.
+      - key: RETENCIONES_MODULO_SECRETO
+        sync: false
       - key: EMPRESA
         sync: false
       - key: XUBIO_USUARIO

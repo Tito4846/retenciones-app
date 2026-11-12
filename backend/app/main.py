@@ -8,13 +8,14 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.api.conexiones import router as router_conexiones
 from app.api.lotes import router as router_lotes
 from app.api.rutas import router
 from app.core.config import settings
-from app.core.usuarios import Usuario, usuario_actual
+from app.core.usuarios import Usuario, canjear_pase, como_yo, conectado, usuario_actual
 from app.services.lotes import ErrorDeLote
 
 logger = logging.getLogger(__name__)
@@ -75,7 +76,7 @@ app.add_middleware(
     allow_origin_regex=r"http://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
-    allow_headers=["Content-Type", "X-Usuario-Id", "X-Usuario-Nombre", "X-Usuario-Roles"],
+    allow_headers=["Content-Type", "Authorization", "X-Usuario-Id", "X-Usuario-Nombre", "X-Usuario-Nivel", "X-Usuario-Modulos"],
     # Sin esto el navegador le esconde al front el nombre del archivo exportado.
     expose_headers=["Content-Disposition", "Content-Length"],
 )
@@ -115,8 +116,19 @@ def salud() -> dict:
 
 @app.get("/api/yo")
 def yo(usuario: Usuario = Depends(usuario_actual)) -> dict:
-    """Quién es y qué roles tiene: el front arma el menú y los permisos con esto."""
-    return {"id": usuario.id, "nombre": usuario.nombre, "roles": sorted(usuario.roles)}
+    """Quién es, su nivel de ContadorWeb y sus roles: el front arma el menú y los permisos con esto."""
+    return {**como_yo(usuario), "conectado": conectado()}
+
+
+class Pase(BaseModel):
+    pase: str
+
+
+@app.post("/api/sesion/entrar")
+def entrar(datos: Pase) -> dict:
+    """Canjea el pase de ContadorWeb (un solo uso) por el token de sesión del módulo."""
+    token, vence, usuario = canjear_pase(datos.pase)
+    return {"token": token, "expira": vence, "usuario": {**usuario, "conectado": True}}
 
 
 def _servir_front(carpeta: Path) -> None:

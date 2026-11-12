@@ -24,12 +24,19 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # Usuario (ver app/core/usuarios.py)
     # ------------------------------------------------------------------
-    # No hay ingreso propio: la identidad y los roles los manda la página
-    # principal en encabezados X-Usuario-*. Sin ellos, el pedido es de este usuario.
+    # No hay ingreso propio: la identidad la da ContadorWeb con un pase firmado.
+    # El MISMO valor en el servicio de ContadorWeb (mínimo 32 caracteres).
+    # Vacío = modo local: encabezados X-Usuario-* o el usuario por defecto.
+    RETENCIONES_MODULO_SECRETO: str = ""
+    # Duración de la sesión que se abre con el pase.
+    SESION_HORAS: float = 12
+    # Modo local: el usuario cuando el pedido no trae X-Usuario-*.
     USUARIO_POR_DEFECTO_ID: str = "local"
     USUARIO_POR_DEFECTO_NOMBRE: str = "Usuario local"
-    # "empleado", "supervisor" o los dos separados por coma.
-    USUARIO_POR_DEFECTO_ROLES: str = "supervisor"
+    # Nivel de ContadorWeb: 200 Administrador General, 100 Administrador, 10 Usuario...
+    USUARIO_POR_DEFECTO_NIVEL: str = "100"
+    # Módulos del nivel, separados por coma (para niveles que no son de administrador).
+    USUARIO_POR_DEFECTO_MODULOS: str = ""
     # Para probar: un supervisor puede borrar del todo los lotes cerrados. Lo aprobado
     # es el respaldo de la DDJJ: esto va en False antes de trabajar con datos reales.
     PERMITIR_ELIMINAR_CERRADOS: bool = True

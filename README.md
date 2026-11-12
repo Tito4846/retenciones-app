@@ -168,30 +168,43 @@ Los datos viven en `backend/datos/retenciones.db` y los archivos en `backend/dat
 **supervisor** hace todo eso y además revisa, aprueba o devuelve y se pasa un lote que tiene otro supervisor.
 Nadie aprueba un lote que preparó.
 
-## Usuarios y roles
+## Usuarios y roles (niveles de ContadorWeb)
 
-El módulo **no tiene ingreso propio**: quién es la persona y qué roles tiene los va a dar la
-**página principal** (el portal desde donde se abre). El contrato es que cada pedido a la API
-traiga estos encabezados (`backend/app/core/usuarios.py`):
+El módulo **no tiene ingreso propio**: la persona entra a **ContadorWeb** y abre Retenciones desde
+el menú, igual que el módulo de Planes de pago. Los permisos salen de los **niveles de acceso de
+ContadorWeb** (Configuración › Niveles de acceso) y se traducen así (`backend/app/core/usuarios.py`):
 
-| Encabezado | Qué lleva |
+| Nivel en ContadorWeb | Rol en Retenciones |
 |---|---|
-| `X-Usuario-Id` | Identificador estable de la persona (queda en los lotes y la auditoría) |
-| `X-Usuario-Nombre` | Cómo se muestra (URL-encoded si lleva acentos) |
-| `X-Usuario-Roles` | `empleado`, `supervisor` o los dos separados por coma |
+| 200 Administrador General · 100 Administrador · cualquier nivel con Configuración o todos los módulos | **supervisor** |
+| Nivel con el módulo `Impuestos/Retenciones - Supervisión` | **supervisor** |
+| Nivel con el módulo `Impuestos/Retenciones` | **empleado** |
+| Cualquier otro | sin acceso (403) |
 
-Sin encabezados, el pedido es del usuario por defecto (`USUARIO_POR_DEFECTO_*` en el `.env`,
-un supervisor «Usuario local»). Sin un rol válido, la API responde 403. `GET /api/yo` devuelve
-quién es y sus roles: con eso el front arma el menú.
+**Cómo entra:** ContadorWeb firma un *pase* de un solo uso y abre `https://<retenciones>/?pase=<pase>`.
+El front lo canjea en `POST /api/sesion/entrar` por un token de sesión (`SESION_HORAS`, 12 h por
+defecto) que va en `Authorization: Bearer` en cada pedido. `GET /api/yo` devuelve quién es, su
+nivel de ContadorWeb y sus roles: con eso el front arma el menú.
 
-**Mientras la página principal no esté conectada**, en el menú hay un selector **Usuario de
-prueba** (empleado, supervisor y otro supervisor) para probar los dos roles y el circuito de
-revisión. Para conectarla, en `frontend/src/app/core/services/sesion.service.ts` se reemplaza la
-identidad del selector por la que entregue la página principal; el resto no cambia.
+El pase es el mismo formato que `firmar_pase` de ContadorWeb (`api/rutas/planes.py`), firmado con
+`RETENCIONES_MODULO_SECRETO` (el **mismo valor** en los dos servicios, mínimo 32 caracteres):
 
-> **Antes de exponer el módulo a internet:** cualquiera puede mandar esos encabezados. La página
-> principal tiene que ponerlos detrás de un proxy propio (que pise lo que mande el navegador) o
-> mandarlos firmados, y el backend validarlo.
+```text
+base64url(JSON) + "." + base64url(HMAC-SHA256(RETENCIONES_MODULO_SECRETO, ese texto))
+JSON = {"u", "n", "exp", "id"} + lo que devuelve accesos.permisos(usuario):
+       {"nivel", "nivel_nombre", "config", "modulos", "general", "estudio", "estudio_nombre"}
+```
+
+Vence a los pocos minutos (más de 10 no se acepta) y no se puede usar dos veces.
+
+**Modo local** (sin `RETENCIONES_MODULO_SECRETO`): para trabajar en una computadora sin
+ContadorWeb. En el menú aparece el selector **Usuario de prueba** (Administrador General,
+Administrador, otro Administrador y Usuario) y cada pedido manda `X-Usuario-Id`, `-Nombre`,
+`-Nivel` y `-Modulos`. Sin encabezados, el pedido es del usuario por defecto
+(`USUARIO_POR_DEFECTO_*`, nivel 100). Con el secreto configurado esos encabezados se ignoran.
+
+> **En Render siempre va `RETENCIONES_MODULO_SECRETO`:** sin él, cualquiera puede mandar los
+> encabezados de prueba.
 
 ## Tests
 
