@@ -8,16 +8,15 @@ Estado: **implementado** (backend `app/services/lotes.py`, front `features/revis
 | Tema | Hoy | Propuesta |
 |---|---|---|
 | Persistencia | `indice.json` + un `.xlsx` por envío | **SQLite** (`datos/retenciones.db`) + archivos inmutables guardados por hash |
-| Identidad | Nombre escrito a mano en el navegador (`localStorage`) | **Login propio**: correo + contraseña (Argon2id), segundo factor TOTP opcional (obligatorio para supervisores si `DOSFA_SUPERVISORES`), token de acceso JWT de 10 min y token de renovación rotativo en cookie HttpOnly. `usuario_actual()` valida el Bearer y relee la cuenta en cada pedido. Detalle en el README («Ingreso y usuarios»). |
+| Identidad | Nombre escrito a mano en el navegador (`localStorage`) | **Sin ingreso propio**: la página principal manda el usuario y sus roles en encabezados `X-Usuario-*` (sin ellos, el usuario por defecto del `.env`). `usuario_actual()` los lee en cada pedido. Detalle en el README («Usuarios y roles»). |
 | Estados | pendiente → en revisión → observado / aprobado (se puede reabrir y borrar) | Ciclo de **lote** con versiones, rechazo con motivo obligatorio y **aprobado terminal e inmutable** |
 | Excel | Hojas `ARCA` y `LIBRO MAYOR` (copia de las planillas originales) | Se mantienen y se agregan `CONCILIACION` (una fila por partida, con estado y código) y `_META` (oculta, para validar la re-subida) |
 | Historial | Lista dentro del JSON, editable | Tabla `auditoria` **append-only** con encadenado de hashes (UTC, usuario, IP, acción) |
 
-Roles (los asigna la cuenta principal en «Usuarios»):
+Roles (los asigna la página principal):
 
 - **empleado** (Maker): concilia, arma el lote, justifica, adjunta respaldos, sube versiones, envía y anula lotes no aprobados.
 - **supervisor** (Checker): todo lo del empleado, y además toma el lote, tilda controles, observa, rechaza o aprueba, se pasa un lote que tiene otro supervisor y consulta la auditoría completa. **Nunca** revisa un lote donde sea autor de alguna versión.
-- La **cuenta principal** (`CUENTA_PRINCIPAL`) y los supervisores que ella habilite gestionan los usuarios.
 
 ---
 

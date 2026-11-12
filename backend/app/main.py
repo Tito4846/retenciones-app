@@ -10,12 +10,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from app.api.auth import router as router_auth
 from app.api.conexiones import router as router_conexiones
 from app.api.lotes import router as router_lotes
 from app.api.rutas import router
 from app.core.config import settings
-from app.core.usuarios import usuario_actual
+from app.core.usuarios import Usuario, usuario_actual
 from app.services.lotes import ErrorDeLote
 
 logger = logging.getLogger(__name__)
@@ -25,10 +24,6 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 
 @asynccontextmanager
 async def ciclo_de_vida(_: FastAPI):
-    # Si la cuenta principal no tiene contraseña, el enlace para elegirla sale en esta consola.
-    from app.services import cuentas
-
-    cuentas.anunciar_configuracion()
     yield
     # Al apagar el servidor se cierran las ventanas de los bots.
     from app.bots import conexiones
@@ -80,14 +75,13 @@ app.add_middleware(
     allow_origin_regex=r"http://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
-    allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
+    allow_headers=["Content-Type", "X-Usuario-Id", "X-Usuario-Nombre", "X-Usuario-Roles"],
     # Sin esto el navegador le esconde al front el nombre del archivo exportado.
     expose_headers=["Content-Disposition", "Content-Length"],
 )
 
-# Todo pide sesión salvo /api/salud y el ingreso. Lotes y usuarios la piden ruta por ruta.
+# Todo pide un usuario con rol salvo /api/salud. Lotes lo pide ruta por ruta.
 con_sesion = [Depends(usuario_actual)]
-app.include_router(router_auth, prefix="/api")
 app.include_router(router, prefix="/api", dependencies=con_sesion)
 app.include_router(router_conexiones, prefix="/api", dependencies=con_sesion)
 app.include_router(router_lotes, prefix="/api")
@@ -100,10 +94,6 @@ async def encabezados_de_seguridad(request: Request, siguiente):
     respuesta.headers.setdefault("X-Frame-Options", "DENY")
     respuesta.headers.setdefault("Referrer-Policy", "no-referrer")
     respuesta.headers.setdefault("Cross-Origin-Resource-Policy", "same-site")
-    if request.url.path.startswith(("/api/auth", "/api/usuarios")):
-        # Tokens y contraseñas temporales: que no queden en ningún caché.
-        respuesta.headers["Cache-Control"] = "no-store"
-        respuesta.headers["Pragma"] = "no-cache"
     return respuesta
 
 
@@ -123,10 +113,16 @@ def salud() -> dict:
     return {"status": "ok"}
 
 
+@app.get("/api/yo")
+def yo(usuario: Usuario = Depends(usuario_actual)) -> dict:
+    """Quién es y qué roles tiene: el front arma el menú y los permisos con esto."""
+    return {"id": usuario.id, "nombre": usuario.nombre, "roles": sorted(usuario.roles)}
+
+
 def _servir_front(carpeta: Path) -> None:
     """
     El build del front (todo se arma en el navegador) servido en el mismo dominio
-    que la API: así la cookie de renovación (SameSite=Strict) viaja sin CORS. Los
+    que la API, sin CORS. Los
     archivos que existen se devuelven tal cual; cualquier otra ruta es de Angular.
     """
     raiz = carpeta.resolve()

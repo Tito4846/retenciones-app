@@ -12,6 +12,8 @@ import {
 import { ConciliacionStore } from '../../core/services/conciliacion.store';
 import { LotesStore } from '../../core/services/lotes.store';
 import { ConexionesStore } from '../../core/services/conexiones.store';
+import { Ayuda } from '../../core/ui/ayuda.directive';
+import { Plegable } from '../../core/ui/plegable';
 import { ConsultaArca } from './consulta-arca';
 
 type TipoArchivo = 'arca' | 'mayor';
@@ -19,14 +21,16 @@ type TipoArchivo = 'arca' | 'mayor';
 interface ZonaCarga {
   tipo: TipoArchivo;
   titulo: string;
+  /** Qué archivo va: en el tooltip de la zona. */
   ayuda: string;
+  formatos: string;
   accept: string;
   archivo: File | null;
 }
 
 @Component({
   selector: 'app-importar',
-  imports: [DecimalPipe, ConsultaArca],
+  imports: [Ayuda, ConsultaArca, DecimalPipe, Plegable],
   templateUrl: './importar.html',
 })
 export class Importar {
@@ -46,14 +50,16 @@ export class Importar {
     {
       tipo: 'arca',
       titulo: 'Excel de ARCA · Mis Retenciones',
-      ayuda: 'Filtrado por la CUIT, el impuesto y las fechas · CSV, XLSX o TXT',
+      ayuda: 'Mis Retenciones filtrado por la CUIT, el impuesto y las fechas.',
+      formatos: 'CSV · XLSX · TXT',
       accept: '.csv,.xlsx,.xls,.txt',
       archivo: this.store.archivoArca(),
     },
     {
       tipo: 'mayor',
       titulo: 'Excel de Xubio · Libro Mayor',
-      ayuda: 'La cuenta de retenciones de ese impuesto, mismas fechas · CSV o XLSX',
+      ayuda: 'El Libro Mayor de la cuenta de retenciones de ese impuesto, mismas fechas.',
+      formatos: 'CSV · XLSX',
       accept: '.csv,.xlsx,.xls',
       archivo: this.store.archivoMayor(),
     },

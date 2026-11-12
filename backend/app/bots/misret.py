@@ -34,7 +34,7 @@ import pandas as pd
 
 from app.services.importador_arca import leer_arca
 from app.services.importador_tablas import normalizar_columnas
-from app.services.impuestos import CODIGOS_ARCA, impuesto_de_texto
+from app.services.impuestos import CODIGOS_PRINCIPALES, impuesto_de_texto
 from app.services.tools import ErrorDeLectura, OperacionCancelada, nunca_cancelada
 
 logger = logging.getLogger(__name__)
@@ -204,11 +204,11 @@ def impuestos_a_consultar(opciones: list[dict], detectados: set[str] | None = No
     el formulario: Ganancias e IVA, los que casi siempre tienen retenciones.
     """
     ofrecidos = [o["codigo"] for o in opciones]
-    principales = [c for c in CODIGOS_ARCA if c in ofrecidos]
+    principales = [c for c in CODIGOS_PRINCIPALES if c in ofrecidos]
 
     elegidos: list[str] = []
     for impuesto in sorted(detectados or ()):
-        propios = [c for c in principales if CODIGOS_ARCA[c] == impuesto]
+        propios = [c for c in principales if CODIGOS_PRINCIPALES[c] == impuesto]
         if not propios:
             propios = [
                 o["codigo"] for o in opciones if impuesto_de_texto(o["codigo"], o["descripcion"]) == impuesto

@@ -157,45 +157,17 @@
 
             <!-- Tipo: retención, percepción o las dos, como el filtro de ARCA -->
             @if (consultado(); as c) {
-              <div class="mt-3 rounded-xl border border-line p-3">
-                <p class="text-sm">
+              <!-- Una sola línea: el impuesto, qué traer (pastilla compacta) y la cuenta de Xubio -->
+              <div class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
+                <span class="min-w-0">
                   <span class="font-mono text-xs font-semibold text-brand-700">{{ c.codigo }}</span>
                   <span class="font-medium"> {{ c.nombre }}</span>
-                  <span class="text-muted"> · ¿qué traer?</span>
-                </p>
-                <div class="mt-2 flex flex-wrap gap-2" role="radiogroup" aria-label="Tipo">
-                  @for (t of c.tipos; track t.id) {
-                    <button
-                      type="button"
-                      role="radio"
-                      [attr.aria-checked]="tipo() === t.id"
-                      (click)="tipo.set(t.id)"
-                      class="flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm font-semibold transition-colors"
-                      [class]="tipo() === t.id ? 'border-brand-600 bg-brand-50 text-brand-800' : 'border-line bg-white text-ink hover:border-brand-300'"
-                    >
-                      <span class="flex h-3.5 w-3.5 items-center justify-center rounded-full border" [class]="tipo() === t.id ? 'border-brand-600' : 'border-brand-300'">
-                        @if (tipo() === t.id) {
-                          <span class="h-1.5 w-1.5 rounded-full bg-brand-600"></span>
-                        }
-                      </span>
-                      {{ t.etiqueta }}
-                    </button>
-                  }
-                </div>
-                <p class="mt-2 text-xs text-muted">
-                  @if (c.tipos.length === 1) {
-                    Con este impuesto ARCA solo admite «{{ c.tipos[0].etiqueta }}».
-                  } @else {
-                    Elegí «Retención» para dejar afuera las percepciones (o al revés), igual que el filtro de ARCA.
-                  }
-                </p>
-                <p class="mt-2 border-t border-line pt-2 text-sm">
-                  <span class="text-muted">Después, en Xubio:</span>
-                  Libro Mayor con las mismas fechas y, en «Cuenta», la de
-                  <span class="font-semibold">{{ cuentaABuscar() }}</span>
-                  que tenga el plan de cuentas.
-                </p>
+                </span>
+                <app-control-segmentado [opciones]="c.tipos" [(valor)]="tipo" [appAyuda]="ayudaTipo()" aria-label="Qué traer" />
               </div>
+              <p class="mt-1.5 text-xs text-muted" [appAyuda]="'Libro Mayor de Xubio con las mismas fechas y, en «Cuenta», la que tenga el plan de cuentas'">
+                En Xubio: cuenta de <span class="font-semibold text-ink">{{ cuentaABuscar() }}</span>
+              </p>
             }
         </div>
       </div>
@@ -230,35 +202,36 @@
         @if (falta(); as mensaje) {
           <p class="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{{ mensaje }}</p>
         }
-        <div class="flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            (click)="traerYConciliar()"
-            [disabled]="!puedeTraerTodo()"
-            class="flex items-center gap-2 rounded-lg bg-brand-700 px-5 py-2.5 font-semibold text-white shadow-sm transition-colors hover:bg-brand-800 disabled:cursor-not-allowed disabled:bg-brand-400"
-          >
-            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14" /><path d="m12 5 7 7-7 7" /></svg>
-            Traer y conciliar
-          </button>
-          <button
-            type="button"
-            (click)="soloArca()"
-            [disabled]="ocupado()"
-            class="rounded-lg border border-line bg-white px-5 py-2.5 font-semibold transition-colors hover:bg-canvas disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Solo consultar ARCA
-          </button>
+        <!-- A la derecha, como el final de un formulario: secundaria y después la principal -->
+        <div class="flex flex-wrap items-center justify-end gap-3">
           @if (!xubioConectado()) {
-            <span class="text-sm text-muted">
+            <span class="mr-auto text-sm text-muted">
               Para traer el Libro Mayor, <a routerLink="/conexiones" class="font-semibold text-brand-700 hover:underline">conectá Xubio</a>.
             </span>
           }
+          <!-- La ayuda va en el envoltorio: un botón deshabilitado no muestra su tooltip -->
+          <span class="inline-flex" [appAyuda]="ayuda.soloArca">
+            <button
+              type="button"
+              (click)="soloArca()"
+              [disabled]="ocupado()"
+              class="rounded-lg border border-line bg-white px-5 py-2.5 font-semibold transition-colors hover:bg-canvas disabled:pointer-events-none disabled:opacity-50"
+            >
+              Solo consultar ARCA
+            </button>
+          </span>
+          <span class="inline-flex" [appAyuda]="xubioConectado() ? ayuda.traer : ayuda.traer + ' ' + ayuda.sinXubio">
+            <button
+              type="button"
+              (click)="traerYConciliar()"
+              [disabled]="!puedeTraerTodo()"
+              class="flex items-center gap-2 rounded-lg bg-brand-700 px-5 py-2.5 font-semibold text-white shadow-sm transition-colors hover:bg-brand-800 disabled:pointer-events-none disabled:bg-brand-400"
+            >
+              Traer y conciliar
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14" /><path d="m12 5 7 7-7 7" /></svg>
+            </button>
+          </span>
         </div>
-        <p class="mt-3 text-xs text-muted">
-          <span class="font-semibold text-ink">Traer y conciliar</span>: baja el Libro Mayor de Xubio, consulta ARCA y
-          cruza los dos. <span class="font-semibold text-ink">Solo consultar ARCA</span>: trae las retenciones sin
-          conciliar (para revisarlas o subir el mayor a mano).
-        </p>
 
         @if (consultandoArca() && !enCurso()) {
           <div class="mt-3 flex flex-wrap items-center gap-3 text-sm text-muted">

@@ -70,5 +70,10 @@ def terminos_de_busqueda(impuesto: str, tipo: str) -> list[str]:
     """
     etiqueta = ETIQUETA_TIPO[tipo]
     sin_acento = unicodedata.normalize("NFKD", etiqueta).encode("ascii", "ignore").decode()
-    impuesto_corto = {"Ganancias": "Ganancia", "Ingresos Brutos": "Brutos"}.get(impuesto, impuesto)
+    impuesto_corto = {
+        "Ganancias": "Ganancia",
+        "Ingresos Brutos": "Brutos",
+        "Impuesto PAIS": "Impuesto",
+        "Transferencia de Inmuebles": "ITI",
+    }.get(impuesto, impuesto)
     return list(dict.fromkeys([etiqueta, sin_acento, impuesto_corto]))

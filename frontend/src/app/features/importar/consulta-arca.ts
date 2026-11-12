@@ -8,6 +8,15 @@ import { LotesStore } from '../../core/services/lotes.store';
 import { CuitPipe } from '../../core/cuit.pipe';
 import { ConexionesStore } from '../../core/services/conexiones.store';
 import { NOMBRES_CORTOS, SUGERIDOS, SelectorImpuestos } from './selector-impuestos';
+import { Ayuda } from '../../core/ui/ayuda.directive';
+import { ControlSegmentado } from '../../core/ui/control-segmentado';
+
+/** Lo que hace cada botón: aparece al pasar el mouse, no ocupa lugar en la pantalla. */
+export const AYUDA_ACCIONES = {
+  traer: 'Baja el Libro Mayor de Xubio, consulta ARCA y cruza los dos.',
+  soloArca: 'Trae las retenciones de ARCA sin conciliar: para revisarlas o subir el mayor a mano.',
+  sinXubio: 'Conectá Xubio para traer el Libro Mayor.',
+} as const;
 
 type Preset = 'mes-anterior' | 'mes-actual' | 'ultimos-3' | 'anio' | 'personalizado';
 type EstadoPaso = 'pendiente' | 'actual' | 'hecho' | 'error';
@@ -88,7 +97,7 @@ const PASOS: { id: PasoAutomatico; titulo: string; ayuda: string }[] = [
  */
 @Component({
   selector: 'app-consulta-arca',
-  imports: [CuitPipe, SelectorImpuestos, RouterLink],
+  imports: [Ayuda, ControlSegmentado, CuitPipe, SelectorImpuestos, RouterLink],
   templateUrl: './consulta-arca.html',
 })
 export class ConsultaArca {
@@ -187,6 +196,16 @@ export class ConsultaArca {
    * impuesto vuelve al que ARCA marca solo ("Retención y/o Percepción" si lo
    * admite), aunque antes se haya elegido otro.
    */
+  protected readonly ayuda = AYUDA_ACCIONES;
+
+  /** La explicación del tipo, en el tooltip del control y no como texto fijo. */
+  protected readonly ayudaTipo = computed(() => {
+    const tipos = this.consultado()?.tipos ?? [];
+    return tipos.length === 1
+      ? `Con este impuesto ARCA solo admite «${tipos[0].etiqueta}».`
+      : 'Elegí «Retención» para dejar afuera las percepciones (o al revés), igual que el filtro de ARCA.';
+  });
+
   protected readonly tipo = linkedSignal<ImpuestoConsultado | null, TipoRetencion>({
     source: this.consultado,
     computation: (actual) => actual?.predeterminado ?? 'RetencionPercepcion',

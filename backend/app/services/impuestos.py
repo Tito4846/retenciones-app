@@ -12,10 +12,35 @@ import unicodedata
 
 from app.services.importador_tablas import _normalizar
 
-# Codigos de impuesto de ARCA que aparecen en "Mis Retenciones".
-CODIGOS_ARCA = {
+# El codigo principal de cada impuesto: el que el bot consulta por defecto en
+# "Mis Retenciones" (Ganancias e IVA, los que casi siempre tienen retenciones).
+CODIGOS_PRINCIPALES = {
     "217": "Ganancias",
     "767": "IVA",
+}
+
+# Nombres de los impuestos que no son Ganancias ni IVA (asi se muestran y asi
+# se cruzan: ARCA y Xubio tienen que dar el mismo).
+PAIS = "Impuesto PAIS"
+BIENES_PERSONALES = "Bienes Personales"
+ITI = "Transferencia de Inmuebles"
+PREMIOS = "Premios"
+DONACIONES = "Donaciones"
+
+# Todos los codigos que se reconocen por numero, aunque el archivo de ARCA venga
+# sin la columna "Descripcion Impuesto": sin esto, una retencion 216 quedaba como
+# "216" y no conciliaba contra la cuenta de IVA. Premios (466) y donaciones (222)
+# van solo por su descripcion: no esta confirmado si ARCA los informa como
+# Ganancias o aparte, y un codigo mal asignado impediria conciliarlos.
+CODIGOS_ARCA = {
+    **CODIGOS_PRINCIPALES,
+    "210": "Ganancias",  # RG 830
+    "787": "Ganancias",  # rentas de cuarta categoria (relacion de dependencia)
+    "218": "Ganancias",  # beneficiarios del exterior
+    "216": "IVA",  # SIRE
+    "939": PAIS,
+    "219": BIENES_PERSONALES,  # acciones y participaciones
+    "172": ITI,
 }
 
 # Palabras (normalizadas) que delatan el impuesto en un texto libre.
@@ -24,6 +49,12 @@ _PALABRAS = (
     ("Ganancias", ("GANANCIA",)),
     ("Ingresos Brutos", ("IIBB", "INGRESOSBRUTOS", "SIRCREB", "ARBA", "AGIP")),
     ("SUSS", ("SUSS", "SEGURIDADSOCIAL")),
+    # Van despues: "Retenciones Ganancias - premios" es Ganancias.
+    (PAIS, ("PAIS",)),
+    (BIENES_PERSONALES, ("BIENESPERSONALES", "BSPERSONALES", "BBPP")),
+    (ITI, ("ITI", "TRANSFERENCIADEINMUEBLES", "TRANSFINMUEBLES")),
+    (PREMIOS, ("PREMIO",)),
+    (DONACIONES, ("DONACION",)),
 )
 
 

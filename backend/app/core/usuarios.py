@@ -1,23 +1,39 @@
 """
 Quién está usando el módulo.
 
-Cada pedido a la API trae `Authorization: Bearer <token de acceso>` (lo emite
-/api/auth/ingresar, ver services/cuentas.py). `usuario_actual` valida la firma y
-el vencimiento, y además busca la cuenta en la base en cada pedido: si la
-desactivaron, le cambiaron la contraseña o cerró la sesión, el token deja de
-servir en el acto aunque no haya vencido.
+No hay ingreso propio: la identidad y los roles los va a dar la página principal
+(el portal desde donde se abre este módulo). El contrato es simple: cada pedido a
+la API trae
+
+    X-Usuario-Id:      identificador estable de la persona (no cambia si cambia el nombre)
+    X-Usuario-Nombre:  cómo se muestra (URL-encoded si lleva acentos)
+    X-Usuario-Roles:   "empleado", "supervisor" o los dos separados por coma
+
+Sin esos encabezados se usa el usuario por defecto de la configuración
+(USUARIO_POR_DEFECTO_*), para trabajar solo en una computadora.
+
+Mientras la página principal no esté conectada, los encabezados los manda el
+front con el selector de usuarios de prueba. OJO: cualquiera puede mandarlos.
+Antes de exponer el módulo a internet, la página principal tiene que ponerlos
+detrás de un proxy propio (que pise lo que mande el navegador) o firmarlos.
 
 Dos roles: el empleado prepara los lotes; el supervisor además los revisa,
 aprueba o devuelve, reasigna y consulta la auditoría. Nadie aprueba lo que
-preparó (eso lo controla la segregación de funciones, no el rol). La cuenta
-principal y las que ella habilite gestionan los usuarios.
+preparó (eso lo controla la segregación de funciones, no el rol).
 """
 
 from dataclasses import dataclass, field
+from urllib.parse import unquote
 
 from fastapi import HTTPException, Request
 
+from app.core.config import settings
+
 ROLES = ("empleado", "supervisor")
+
+ENCABEZADO_ID = "x-usuario-id"
+ENCABEZADO_NOMBRE = "x-usuario-nombre"
+ENCABEZADO_ROLES = "x-usuario-roles"
 
 
 @dataclass(frozen=True)
@@ -27,17 +43,9 @@ class Usuario:
     roles: frozenset[str] = field(default_factory=frozenset)
     ip: str = ""
     user_agent: str = ""
-    email: str = ""
-    principal: bool = False
-    gestiona_usuarios: bool = False
-    sesion: str = ""
 
     def tiene(self, rol: str) -> bool:
         return rol in self.roles
-
-    @property
-    def puede_gestionar(self) -> bool:
-        return self.principal or self.gestiona_usuarios
 
 
 def ip_de(request: Request) -> str:
@@ -45,25 +53,25 @@ def ip_de(request: Request) -> str:
     return request.client.host if request.client else ""
 
 
-def anonimo(request: Request, email: str = "") -> Usuario:
-    """Para auditar intentos de quien todavía no entró."""
-    return Usuario("", email or "(sin identificar)", frozenset(), ip_de(request), request.headers.get("user-agent", "")[:200], email)
+def leer_roles(texto: str) -> frozenset[str]:
+    """'supervisor, empleado' -> {'supervisor', 'empleado'}. Lo que no es un rol se ignora."""
+    return frozenset(r.strip().lower() for r in texto.split(",") if r.strip().lower() in ROLES)
 
 
-def _no_autorizado(mensaje: str = "Tu sesión venció. Volvé a ingresar.") -> HTTPException:
-    return HTTPException(401, {"codigo": "SIN_SESION", "mensaje": mensaje, "errores": []},
-                         headers={"WWW-Authenticate": 'Bearer realm="retenciones"'})
+def _sin_permiso(mensaje: str) -> HTTPException:
+    return HTTPException(403, {"codigo": "SIN_ROL", "mensaje": mensaje, "errores": []})
 
 
 def usuario_actual(request: Request) -> Usuario:
-    """Dependencia de FastAPI: el usuario del token de acceso, o 401."""
-    from app.services import cuentas
-
-    encabezado = request.headers.get("authorization", "")
-    tipo, _, token = encabezado.partition(" ")
-    if tipo.lower() != "bearer" or not token:
-        raise _no_autorizado("Ingresá con tu correo y contraseña.")
-    usuario = cuentas.usuario_del_token(token.strip(), ip_de(request), request.headers.get("user-agent", "")[:200])
-    if usuario is None:
-        raise _no_autorizado()
-    return usuario
+    """Dependencia de FastAPI: quién hace el pedido, según la página principal o el usuario por defecto."""
+    usuario_id = unquote(request.headers.get(ENCABEZADO_ID, "")).strip()[:100]
+    if usuario_id:
+        nombre = unquote(request.headers.get(ENCABEZADO_NOMBRE, "")).strip()[:120] or usuario_id
+        roles = leer_roles(unquote(request.headers.get(ENCABEZADO_ROLES, "")))
+    else:
+        usuario_id = settings.USUARIO_POR_DEFECTO_ID
+        nombre = settings.USUARIO_POR_DEFECTO_NOMBRE
+        roles = leer_roles(settings.USUARIO_POR_DEFECTO_ROLES)
+    if not roles:
+        raise _sin_permiso(f"{nombre} no tiene un rol para usar este módulo (empleado o supervisor).")
+    return Usuario(usuario_id, nombre, roles, ip_de(request), request.headers.get("user-agent", "")[:200])

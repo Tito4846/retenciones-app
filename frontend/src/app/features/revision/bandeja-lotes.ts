@@ -3,6 +3,7 @@ import { RouterLink } from '@angular/router';
 import { EstadoLote, LoteListado } from '../../core/models/lote.models';
 import { LotesStore } from '../../core/services/lotes.store';
 import { SesionService } from '../../core/services/sesion.service';
+import { progreso } from './revision.reglas';
 import { CONCILIADO, ESTADOS, hace, iniciales, periodo, pesos, quienArmo } from './revision.util';
 
 type Bandeja = 'mias' | 'espera' | 'cerrados';
@@ -66,6 +67,15 @@ const PESTANAS: { id: Bandeja; titulo: string }[] = [
               </div>
             }
             @if (excepciones(l); as n) {
+              @let avance = progreso(n, l.sin_completar);
+              <div class="mt-2 flex items-center gap-2" role="progressbar" [attr.aria-valuenow]="avance" aria-valuemin="0" aria-valuemax="100"
+                [attr.aria-label]="'Excepciones resueltas de ' + l.empresa">
+                <div class="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-200">
+                  <div class="h-full rounded-full transition-[width] duration-500" [style.width.%]="avance"
+                    [class]="avance === 100 ? 'bg-emerald-500' : avance >= 50 ? 'bg-amber-500' : 'bg-red-500'"></div>
+                </div>
+                <span class="w-9 shrink-0 text-right text-[11px] font-semibold text-slate-600 tabular-nums">{{ avance }}%</span>
+              </div>
               <p class="mt-1 text-xs">
                 <span class="font-semibold" [class]="l.sin_completar ? 'text-amber-800' : 'text-emerald-700'">
                   {{ n }} {{ n === 1 ? 'excepción' : 'excepciones' }}{{ l.sin_completar ? ' · ' + l.sin_completar + ' sin completar' : ' · completas' }}
@@ -105,6 +115,8 @@ export class BandejaLotes {
   protected readonly pesos = pesos;
   protected readonly periodo = periodo;
   protected readonly iniciales = iniciales;
+  /** (total_excepciones − sin_completar) / total_excepciones. */
+  protected readonly progreso = progreso;
 
   /** El lote elegido. null = todavía ninguno: se abre el primero de la lista. */
   readonly seleccion = model<string | null>(null);

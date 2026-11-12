@@ -1,11 +1,10 @@
 import { CurrencyPipe, DatePipe, NgTemplateOutlet, PercentPipe } from '@angular/common';
-import { Component, ElementRef, computed, effect, inject, linkedSignal, signal, untracked, viewChild } from '@angular/core';
+import { Component, ElementRef, computed, effect, inject, linkedSignal, signal, viewChild } from '@angular/core';
 import { Router } from '@angular/router';
 import {
   CambiosMovimientos,
   CriterioConciliacion,
   MovimientoNuevo,
-  DetalleConciliacion,
   MotivoDiferencia,
   Retencion,
   Sugerencia,
@@ -15,11 +14,13 @@ import { NuevoLote } from '../../core/models/lote.models';
 import { LotesStore } from '../../core/services/lotes.store';
 import { SesionService } from '../../core/services/sesion.service';
 import { periodo } from '../revision/revision.util';
+import { Alerta } from '../../core/ui/alerta';
+import { Ayuda } from '../../core/ui/ayuda.directive';
+import { Popconfirm } from '../../core/ui/popconfirm';
+import { CampoEditable, EstadoTablaConciliacion, Pestana } from './conciliacion.estado';
+import { PieConciliacion } from './pie-conciliacion';
 
-type Bandeja = keyof DetalleConciliacion;
-type Pestana = Bandeja | 'revisar';
 type CampoOrden = 'fecha' | 'razon_social' | 'importe' | 'impuesto';
-type CampoEditable = 'fecha' | 'razon_social' | 'certificado' | 'documento' | 'importe';
 
 interface PestanaConfig {
   id: Pestana;
@@ -140,14 +141,32 @@ function normalizar(texto: string | null | undefined): string {
 
 @Component({
   selector: 'app-conciliacion',
-  imports: [CurrencyPipe, DatePipe, NgTemplateOutlet, PercentPipe],
+  imports: [Alerta, Ayuda, CurrencyPipe, DatePipe, NgTemplateOutlet, PercentPipe, PieConciliacion, Popconfirm],
   templateUrl: './conciliacion.html',
+  // Un estado de tabla por pantalla: al salir se descarta.
+  providers: [EstadoTablaConciliacion],
   // El embudo está fijo en la pantalla: si la página se mueve, se mueve con su columna.
   host: { '(window:scroll)': 'ubicarFiltro()', '(window:resize)': 'ubicarFiltro()' },
 })
 export class Conciliacion {
   protected readonly store = inject(ConciliacionStore);
   private readonly router = inject(Router);
+  /** Pestaña, celda en edición y cambios sin guardar: todo el estado de la tabla, aparte de la vista. */
+  protected readonly tabla = inject(EstadoTablaConciliacion);
+
+  /**
+   * Los avisos de arriba en uno solo: por qué no se armó el lote y si los archivos
+   * no parecen del mismo cruce. Ninguno frena: se pueden cerrar.
+   */
+  protected readonly avisosArriba = computed(() => [
+    ...(this.lotes.errorCruce() ? [this.lotes.errorCruce()!.mensaje] : []),
+    ...this.store.avisos(),
+  ]);
+
+  protected cerrarAvisos(): void {
+    this.tabla.avisosCerrados.set(true);
+    this.lotes.errorCruce.set(null);
+  }
 
   /** A, B y C: cada tarjeta filtra la tabla. */
   protected readonly tarjetas = PESTANAS.filter((p) => p.letra);
@@ -169,26 +188,8 @@ export class Conciliacion {
     this.store.sugerencias().filter((s) => !this.descartadas().has(`${s.id_arca}|${s.id_mayor}`)),
   );
 
-  /**
-   * La conciliación que se está mirando. Va en un computed aparte a propósito:
-   * solo avisa cuando cambia de verdad, y no cada vez que guardar o emparejar
-   * cambian el resumen (eso volvía a elegir la pestaña).
-   */
-  private readonly conciliacionActual = computed(() => (this.store.resumen() ? this.store.taskId() : null));
-
-  /** Arranca donde hay trabajo: lo dudoso, lo no declarado, lo sin certificado. */
-  protected readonly pestanaActiva = linkedSignal<string | null, Pestana>({
-    // Se elige al llegar un resultado nuevo, no al guardar o emparejar dentro del mismo.
-    source: this.conciliacionActual,
-    computation: () =>
-      untracked(() => {
-        if (this.store.sugerencias().length) return 'revisar';
-        const r = this.store.resumen();
-        if (r?.total_faltan_en_mayor) return 'faltan_en_mayor';
-        if (r?.total_faltan_en_arca) return 'faltan_en_arca';
-        return 'conciliados';
-      }),
-  });
+  /** Arranca donde hay trabajo (ver `pestanaInicial`). */
+  protected readonly pestanaActiva = this.tabla.pestanaActiva;
   protected readonly config = computed(
     () => PESTANAS.find((p) => p.id === this.pestanaActiva()) ?? PESTANAS[0],
   );
@@ -210,13 +211,14 @@ export class Conciliacion {
     document.getElementById('detalle')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
-  // --- Edición en línea: se corrige escribiendo sobre la celda (solo en pantalla y en el aviso)
-  /** Cambios hechos a mano, por id de fila; se vacían con cada conciliación nueva. */
-  protected readonly ediciones = linkedSignal<string | null, Map<string, Partial<Retencion>>>({
-    source: () => this.store.taskId(),
-    computation: () => new Map(),
-  });
-  protected readonly borrador = signal<{ id: string; campo: CampoEditable; valor: string; error?: boolean } | null>(null);
+  // --- Edición en línea: el estado vive en EstadoTablaConciliacion; acá solo la vista
+  protected readonly ediciones = this.tabla.ediciones;
+  protected readonly borrador = this.tabla.borrador;
+  protected readonly nuevos = this.tabla.nuevos;
+  protected readonly eliminados = this.tabla.eliminados;
+  protected readonly pendientes = this.tabla.pendientes;
+  protected readonly confirmandoQuitar = this.tabla.confirmandoQuitar;
+  protected readonly conEdicion = this.tabla.conEdicion;
   private readonly celdaEnEdicion = viewChild<ElementRef<HTMLInputElement>>('celdaEnEdicion');
 
   constructor() {
@@ -227,95 +229,52 @@ export class Conciliacion {
     });
   }
 
-  /** La fila con lo editado a mano encima de lo que vino de la conciliación. */
-  protected conEdicion = (f: Retencion): Retencion => {
-    const cambios = f.id ? this.ediciones().get(f.id) : undefined;
-    return cambios ? { ...f, ...cambios } : f;
-  };
-
   protected enEdicion(item: Retencion, campo: CampoEditable): boolean {
-    const b = this.borrador();
-    return !!b && b.id === item.id && b.campo === campo;
+    return this.tabla.enEdicion(item, campo);
   }
 
   protected editado(item: Retencion, campo: CampoEditable): boolean {
-    return !!item.id && campo in (this.ediciones().get(item.id) ?? {});
+    return this.tabla.editado(item, campo);
   }
 
   protected editar(item: Retencion, campo: CampoEditable): void {
-    if (!item.id) return;
-    const crudo = item[campo];
-    const valor =
-      campo === 'importe' ? String(crudo ?? '').replace('.', ',') : campo === 'fecha' ? String(crudo ?? '').slice(0, 10) : String(crudo ?? '');
-    this.borrador.set({ id: item.id, campo, valor });
+    this.tabla.editar(item, campo);
   }
 
   protected escribir(valor: string): void {
-    this.borrador.update((b) => (b ? { ...b, valor, error: false } : b));
+    this.tabla.escribir(valor);
   }
 
-  /** Enter o salir de la celda. El importe se lee como se escribe acá: "1.234,56". */
   protected confirmarBorrador(): void {
-    const b = this.borrador();
-    if (!b) return;
-    const limpio = b.valor.trim();
-    let valor: string | number = limpio;
-    if (b.campo === 'importe') {
-      valor = Number(limpio.includes(',') ? limpio.replace(/\./g, '').replace(',', '.') : limpio);
-      if (!limpio || !Number.isFinite(valor) || valor < 0) return this.borrador.set({ ...b, error: true });
-    } else if (b.campo === 'fecha' && !/^\d{4}-\d{2}-\d{2}$/.test(limpio)) {
-      return this.borrador.set({ ...b, error: true });
-    }
-    const original = this.original(b.id);
-    this.ediciones.update((m) => {
-      const nueva = new Map(m);
-      const cambios = { ...nueva.get(b.id) };
-      const igual = b.campo === 'fecha' ? String(original?.fecha ?? '').slice(0, 10) === valor : (original?.[b.campo] ?? '') === valor;
-      if (igual) delete cambios[b.campo];
-      else Object.assign(cambios, { [b.campo]: valor });
-      if (Object.keys(cambios).length) nueva.set(b.id, cambios);
-      else nueva.delete(b.id);
-      return nueva;
-    });
-    this.borrador.set(null);
+    this.tabla.confirmarBorrador();
   }
 
   protected cancelarBorrador(): void {
-    this.borrador.set(null);
+    this.tabla.cancelarBorrador();
   }
 
   protected deshacerEdiciones(): void {
-    this.borrador.set(null);
-    this.ediciones.set(new Map());
-    this.nuevos.set([]);
-    this.eliminados.set(new Set());
+    this.tabla.deshacerTodo();
   }
-
-  // --- Movimientos agregados a mano y guardado en el servidor
-  /** Agregados que todavía no se guardaron. */
-  protected readonly nuevos = linkedSignal<string | null, MovimientoNuevo[]>({
-    source: () => this.store.taskId(),
-    computation: () => [],
-  });
-  /** Ids marcados para quitar al guardar. */
-  protected readonly eliminados = linkedSignal<string | null, Set<string>>({
-    source: () => this.store.taskId(),
-    computation: () => new Set(),
-  });
-  protected readonly pendientes = computed(() => this.ediciones().size + this.nuevos().length + this.eliminados().size);
 
   protected eliminado(item: Retencion): boolean {
-    return !!item.id && this.eliminados().has(item.id);
+    return this.tabla.eliminado(item);
   }
 
-  /** Marca o desmarca la fila para quitarla al guardar. */
-  protected alternarEliminado(item: Retencion): void {
+  /** Quitar un movimiento se confirma (popconfirm); volver a incluirlo, no. */
+  protected pedirQuitar(item: Retencion): void {
     if (!item.id) return;
-    this.eliminados.update((s) => {
-      const nueva = new Set(s);
-      if (!nueva.delete(item.id!)) nueva.add(item.id!);
-      return nueva;
-    });
+    if (this.tabla.eliminado(item)) return this.tabla.alternarEliminado(item);
+    this.confirmandoQuitar.set(this.confirmandoQuitar() === item.id ? null : item.id);
+  }
+
+  protected alternarEliminado(item: Retencion): void {
+    this.tabla.alternarEliminado(item);
+  }
+
+  /** El comprobante se corrige del lado al que pertenece la fila: certificado en ARCA, documento en el Mayor. */
+  protected campoComprobante(): CampoEditable {
+    return this.pestanaActiva() === 'faltan_en_arca' ? 'documento' : 'certificado';
   }
   protected readonly formNuevo = signal<MovimientoNuevo | null>(null);
   protected readonly errorNuevo = signal<string | null>(null);
@@ -325,7 +284,7 @@ export class Conciliacion {
   protected readonly impuestosConocidos = computed(() => {
     const d = this.store.detalle();
     const todos = d ? [...d.conciliados, ...d.faltan_en_arca, ...d.faltan_en_mayor].map((f) => f.impuesto) : [];
-    return [...new Set([...todos.filter(Boolean), 'IVA', 'Ganancias', 'Ingresos Brutos', 'SUSS'])];
+    return [...new Set([...todos.filter(Boolean), 'IVA', 'Ganancias', 'Ingresos Brutos', 'SUSS', 'Impuesto PAIS', 'Bienes Personales', 'Transferencia de Inmuebles', 'Premios', 'Donaciones'])];
   });
 
   /** Abre el alta: del lado que falta según la pestaña (en «Faltan en el Mayor», un asiento del mayor). */
@@ -378,11 +337,6 @@ export class Conciliacion {
       this.guardado.set(true);
       setTimeout(() => this.guardado.set(false), 2500);
     });
-  }
-
-  private original(id: string): Retencion | undefined {
-    const d = this.store.detalle();
-    return d ? [...d.conciliados, ...d.faltan_en_arca, ...d.faltan_en_mayor].find((f) => f.id === id) : undefined;
   }
 
   // --- Filtros y orden de la tabla
@@ -747,8 +701,7 @@ export class Conciliacion {
   });
 
   protected elegirPestana(id: Pestana): void {
-    this.pestanaActiva.set(id);
-    this.store.errorPar.set(null);
+    this.tabla.elegirPestana(id);
   }
 
   protected ordenarPor(campo: CampoOrden): void {

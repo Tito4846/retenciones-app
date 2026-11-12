@@ -13,205 +13,129 @@
 </header>
 
 @if (store.sinServidor()) {
-  <p class="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+  <p class="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">
     No se pudo hablar con el servidor. Revisá que el backend esté corriendo en el puerto 8001.
   </p>
 }
 @if (store.error(); as error) {
-  <p class="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{{ error }}</p>
+  <p class="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">{{ error }}</p>
 }
 
-<div class="grid gap-6 xl:grid-cols-2">
-  <!-- ARCA -->
-  <section class="rounded-2xl border border-line bg-white p-6">
-    <div class="mb-4 flex items-center justify-between gap-3">
-      <div>
-        <h2 class="text-lg font-semibold">ARCA</h2>
-        <p class="text-sm text-muted">Mis Retenciones, con tu clave fiscal.</p>
-      </div>
-      @switch (store.arca()?.estado) {
-        @case ('conectado') {
-          @if (store.arca()?.renovando) {
-            <span class="rounded-full bg-amber-50 px-3 py-1 text-sm font-semibold text-amber-700">Renovando sesión…</span>
-          } @else {
-            <span class="rounded-full bg-emerald-50 px-3 py-1 text-sm font-semibold text-emerald-700">Conectado</span>
-          }
-        }
-        @case ('conectando') {
-          <span class="rounded-full bg-amber-50 px-3 py-1 text-sm font-semibold text-amber-700">Conectando…</span>
-        }
-        @default {
-          <span class="rounded-full bg-canvas px-3 py-1 text-sm font-semibold text-muted">Sin conectar</span>
-        }
-      }
-    </div>
+<!-- Lo mismo en los dos formularios: por qué es seguro poner la clave acá -->
+<ng-template #avisoSeguridad>
+  <div class="flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 sm:col-span-2">
+    <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4">
+        <rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" />
+      </svg>
+    </span>
+    <p>
+      <span class="font-semibold">Tus claves no se guardan.</span>
+      Se usan solo para iniciar sesión: no se escriben en disco ni en la base de datos, y se borran al desconectar.
+    </p>
+  </div>
+</ng-template>
 
-    @switch (store.arca()?.estado) {
+<div class="grid items-start gap-6 xl:grid-cols-2">
+  <!-- ARCA -->
+  @let arca = store.arca();
+  <app-bot-connection-card
+    nombre="ARCA"
+    descripcion="Mis Retenciones, con tu clave fiscal."
+    [salud]="saludArca()"
+    [etiqueta]="etiquetaArca()"
+    [mensaje]="arca?.mensaje ?? null"
+    [ultimaActividad]="arca?.ultima_actividad"
+    [eventos]="arca?.eventos ?? []"
+    [ocupado]="store.enviando()"
+    [principal]="saludArca() === 'conectado' ? { texto: 'Consultar retenciones', ruta: '/importar' } : null"
+    [manual]="ventanaArca() ? 'Abrir ventana de ARCA' : null"
+    [desconectar]="saludArca() === 'conectado' ? 'Desconectar' : ventanaArca() ? 'Cancelar' : null"
+    advertencia="el bot deja de mantener la sesión de ARCA y no puede consultar retenciones."
+    (abrirVentana)="store.mostrar('arca')"
+    (desconectado)="store.desconectarArca()"
+  >
+    @switch (saludArca()) {
       @case ('conectado') {
-        <p class="text-sm">
-          Conectado con la CUIT <span class="font-mono">{{ store.arca()?.cuit | cuit }}</span>.
-        </p>
-        <p class="mt-2 text-sm text-muted">{{ store.arca()?.mensaje }}</p>
-        <div class="mt-4 flex flex-wrap gap-3">
-          <a routerLink="/importar" class="rounded-lg bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-800">
-            Consultar retenciones
-          </a>
-          <button type="button" (click)="store.mostrar('arca')" class="rounded-lg border border-line px-4 py-2 text-sm font-semibold hover:bg-canvas">
-            Abrir ventana de ARCA
-          </button>
-          <button type="button" (click)="store.desconectarArca()" class="rounded-lg border border-line px-4 py-2 text-sm font-semibold hover:bg-canvas">
-            Desconectar
-          </button>
-        </div>
+        <p class="text-sm">Conectado con la CUIT <span class="font-mono font-semibold">{{ arca?.cuit | cuit }}</span>.</p>
+        @if (arca?.mensaje; as m) { <p class="mt-1 text-sm text-muted">{{ m }}</p> }
       }
-      @case ('conectando') {
-        <div class="flex items-center gap-3 text-sm text-muted">
-          <span class="h-5 w-5 shrink-0 animate-spin rounded-full border-[3px] border-brand-100 border-t-brand-600"></span>
-          {{ store.arca()?.mensaje }}
-        </div>
-        <button type="button" (click)="store.desconectarArca()" class="mt-4 rounded-lg border border-line px-4 py-2 text-sm font-semibold hover:bg-canvas">
-          Cancelar
-        </button>
-      }
+      @case ('en_curso') {}
+      @case ('requiere_accion') {}
       @default {
-        @if (store.arca()?.mensaje; as mensaje) {
-          <p class="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">{{ mensaje }}</p>
-        }
-        <form #formArca class="grid gap-3 sm:grid-cols-2" (submit)="$event.preventDefault(); conectarArca(formArca)">
-          <label class="block">
-            <span class="mb-1 block text-sm font-medium">CUIT</span>
-            <input
-              name="cuit"
-              type="text"
-              inputmode="numeric"
-              autocomplete="username"
-              placeholder="20-12345678-9"
-              (input)="faltaArca.set(null)"
-              class="w-full rounded-lg border border-line px-3 py-2 text-sm focus:border-brand-400 focus:outline-none"
-            />
-          </label>
-          <label class="block">
-            <span class="mb-1 block text-sm font-medium">Clave fiscal</span>
-            <input
-              name="clave"
-              type="password"
-              autocomplete="current-password"
-              (input)="faltaArca.set(null)"
-              class="w-full rounded-lg border border-line px-3 py-2 text-sm focus:border-brand-400 focus:outline-none"
-            />
-          </label>
+        <form #formArca class="grid gap-3 sm:grid-cols-2" (submit)="$event.preventDefault(); conectarArca(formArca)" (input)="faltaArca.set(null)"
+          [attr.aria-label]="saludArca() === 'error' ? 'Reconectar ARCA' : 'Conectar ARCA'">
+          <ng-container *ngTemplateOutlet="avisoSeguridad" />
+          <app-campo-clave nombre="cuit" etiqueta="CUIT" autocompletar="username" modo="numeric" ayuda="20-12345678-9" />
+          <app-campo-clave nombre="clave" etiqueta="Clave fiscal" [secreto]="true" autocompletar="current-password" />
           <div class="sm:col-span-2">
             @if (faltaArca(); as falta) {
-              <p class="mb-2 text-sm text-red-600">{{ falta }}</p>
+              <p class="mb-2 text-sm text-red-600" role="alert">{{ falta }}</p>
             }
-            <button
-              type="submit"
-              [disabled]="store.enviando()"
-              class="rounded-lg bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:bg-brand-400"
-            >
-              Conectar ARCA
+            <button type="submit" [disabled]="store.enviando()"
+              class="inline-flex items-center gap-2 rounded-lg bg-brand-700 px-5 py-2.5 text-sm font-bold text-white shadow-md shadow-brand-700/20 hover:bg-brand-800 disabled:cursor-not-allowed disabled:bg-brand-400">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4" aria-hidden="true">
+                <rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" />
+              </svg>
+              {{ saludArca() === 'error' ? 'Reconectar ARCA' : 'Conectar ARCA' }}
             </button>
           </div>
         </form>
       }
     }
-
-    @if (store.arca()?.descarga; as descarga) {
-      <div class="mt-5 flex items-center gap-3 rounded-xl border border-line bg-canvas px-4 py-3">
-        <svg class="h-5 w-5 shrink-0 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M20 6 9 17l-5-5" />
-        </svg>
-        <div class="min-w-0 text-sm">
-          <p class="truncate font-semibold">{{ descarga.nombre }}</p>
-          <p class="text-muted">{{ descarga.filas }} retenciones · exportado a las {{ descarga.cuando | date: 'HH:mm' }}</p>
-        </div>
-      </div>
+    <!-- La descarga queda para conciliar aunque se cierre la ventana -->
+    @if (arca?.descarga; as descarga) {
+      <p class="mt-3 flex items-center gap-2 text-sm">
+        <svg class="h-4 w-4 shrink-0 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
+        <span class="min-w-0 truncate" [title]="descarga.nombre"><span class="font-semibold">{{ descarga.filas }} retenciones</span> listas para conciliar · {{ descarga.cuando | date: 'HH:mm' }}</span>
+      </p>
     }
-  </section>
+  </app-bot-connection-card>
 
   <!-- Xubio -->
-  <section class="rounded-2xl border border-line bg-white p-6">
-    <div class="mb-4 flex items-center justify-between gap-3">
-      <div>
-        <h2 class="text-lg font-semibold">Xubio</h2>
-        <p class="text-sm text-muted">Libro Mayor de las cuentas de retenciones.</p>
-      </div>
-      @switch (store.xubio()?.estado) {
-        @case ('conectado') {
-          <span class="rounded-full bg-emerald-50 px-3 py-1 text-sm font-semibold text-emerald-700">Conectado</span>
-        }
-        @case ('esperando_ingreso') {
-          <span class="rounded-full bg-amber-50 px-3 py-1 text-sm font-semibold text-amber-700">Esperando ingreso…</span>
-        }
-        @default {
-          <span class="rounded-full bg-canvas px-3 py-1 text-sm font-semibold text-muted">Sin conectar</span>
-        }
-      }
-    </div>
-
-    @switch (store.xubio()?.estado) {
+  @let xubio = store.xubio();
+  <app-bot-connection-card
+    nombre="Xubio"
+    descripcion="Libro Mayor de las cuentas de retenciones."
+    [salud]="saludXubio()"
+    [mensaje]="xubio?.mensaje ?? null"
+    [ultimaActividad]="xubio?.ultima_actividad"
+    [eventos]="xubio?.eventos ?? []"
+    [ocupado]="store.enviando()"
+    [principal]="saludXubio() === 'conectado' ? { texto: 'Ir a conciliar', ruta: '/importar' } : null"
+    [manual]="ventanaXubio() ? 'Abrir ventana de Xubio' : null"
+    [desconectar]="saludXubio() === 'conectado' ? 'Desconectar' : ventanaXubio() ? 'Cancelar' : null"
+    advertencia="el bot no va a poder bajar el Libro Mayor al conciliar."
+    (abrirVentana)="store.mostrar('xubio')"
+    (desconectado)="store.desconectarXubio()"
+  >
+    @switch (saludXubio()) {
       @case ('conectado') {
         <p class="text-sm">
-          Conectado{{ store.xubio()?.usuario ? ' como ' + store.xubio()?.usuario : '' }}. El Libro Mayor se baja al conciliar.
+          Conectado{{ xubio?.usuario ? ' como ' + xubio?.usuario : '' }}@if (xubio?.empresa_activa) { · empresa <span class="font-semibold">{{ xubio?.empresa_activa }}</span>}.
         </p>
-        <div class="mt-4 flex flex-wrap gap-3">
-          <button type="button" (click)="store.mostrar('xubio')" class="rounded-lg border border-line px-4 py-2 text-sm font-semibold hover:bg-canvas">
-            Abrir ventana de Xubio
-          </button>
-          <button type="button" (click)="store.desconectarXubio()" class="rounded-lg border border-line px-4 py-2 text-sm font-semibold hover:bg-canvas">
-            Desconectar
-          </button>
-        </div>
+        <p class="mt-1 text-sm text-muted">El Libro Mayor se baja solo al conciliar.</p>
       }
-      @case ('esperando_ingreso') {
-        <div class="flex items-center gap-3 text-sm text-muted">
-          <span class="h-5 w-5 shrink-0 animate-spin rounded-full border-[3px] border-brand-100 border-t-brand-600"></span>
-          {{ store.xubio()?.mensaje }}
-        </div>
-        <div class="mt-4 flex flex-wrap gap-3">
-          <button type="button" (click)="store.mostrar('xubio')" class="rounded-lg border border-line px-4 py-2 text-sm font-semibold hover:bg-canvas">
-            Abrir ventana de Xubio
-          </button>
-          <button type="button" (click)="store.desconectarXubio()" class="rounded-lg border border-line px-4 py-2 text-sm font-semibold hover:bg-canvas">
-            Cancelar
-          </button>
-        </div>
-      }
+      @case ('en_curso') {}
+      @case ('requiere_accion') {}
       @default {
-        @if (store.xubio()?.mensaje; as mensaje) {
-          <p class="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">{{ mensaje }}</p>
-        }
-        @if (store.xubio()?.cuenta_env) {
+        @if (xubio?.cuenta_env) {
           <p class="mb-4 text-sm text-muted">
-            El servidor tiene la cuenta {{ store.xubio()?.usuario }}: el bot entra solo. Si querés usar otra, cargala abajo.
+            El servidor tiene la cuenta {{ xubio?.usuario }}: el bot entra solo. Si querés usar otra, cargala abajo.
           </p>
         }
-        <form #formXubio class="grid gap-3 sm:grid-cols-2" (submit)="$event.preventDefault(); conectarXubio(formXubio)">
-          <label class="block">
-            <span class="mb-1 block text-sm font-medium">Mail de Xubio</span>
-            <input
-              name="usuario"
-              type="email"
-              autocomplete="username"
-              class="w-full rounded-lg border border-line px-3 py-2 text-sm focus:border-brand-400 focus:outline-none"
-            />
-          </label>
-          <label class="block">
-            <span class="mb-1 block text-sm font-medium">Contraseña</span>
-            <input
-              name="clave"
-              type="password"
-              autocomplete="current-password"
-              class="w-full rounded-lg border border-line px-3 py-2 text-sm focus:border-brand-400 focus:outline-none"
-            />
-          </label>
+        <form #formXubio class="grid gap-3 sm:grid-cols-2" (submit)="$event.preventDefault(); conectarXubio(formXubio)"
+          [attr.aria-label]="saludXubio() === 'error' ? 'Reconectar Xubio' : 'Conectar Xubio'">
+          <ng-container *ngTemplateOutlet="avisoSeguridad" />
+          <app-campo-clave nombre="usuario" etiqueta="Mail de Xubio" tipoBase="email" autocompletar="username" />
+          <app-campo-clave nombre="clave" etiqueta="Contraseña" [secreto]="true" autocompletar="current-password" />
           <div class="sm:col-span-2">
-            <button
-              type="submit"
-              [disabled]="store.enviando()"
-              class="rounded-lg bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:bg-brand-400"
-            >
-              Conectar Xubio
+            <button type="submit" [disabled]="store.enviando()"
+              class="inline-flex items-center gap-2 rounded-lg bg-brand-700 px-5 py-2.5 text-sm font-bold text-white shadow-md shadow-brand-700/20 hover:bg-brand-800 disabled:cursor-not-allowed disabled:bg-brand-400">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4" aria-hidden="true">
+                <rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" />
+              </svg>
+              {{ saludXubio() === 'error' ? 'Reconectar Xubio' : 'Conectar Xubio' }}
             </button>
             <p class="mt-2 text-xs text-muted">
               Sin mail ni contraseña se abre la ventana y entrás vos. Si Xubio pide captcha, resolvelo en esa ventana.
@@ -220,12 +144,7 @@
         </form>
       }
     }
-  </section>
+  </app-bot-connection-card>
 </div>
 
-<p class="mt-6 flex items-start gap-2 text-sm text-muted">
-  <svg class="mt-0.5 h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" />
-  </svg>
-  Las claves se usan solo para entrar y no se guardan. Las ventanas de los bots se abren en la computadora donde corre el servidor.
-</p>
+<p class="mt-6 text-sm text-muted">Las ventanas de los bots se abren en la computadora donde corre el servidor.</p>

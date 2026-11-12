@@ -49,14 +49,10 @@ def _justificar_todo(lote: dict, quien=ANA) -> dict:
     return lote
 
 
-@pytest.mark.login_real
-def test_sin_sesion_no_entra():
-    for ruta in ("/api/lotes", "/api/conexiones", "/api/estado/x", "/api/usuarios"):
-        r = cliente.get(ruta)
-        assert r.status_code == 401 and r.json()["detail"]["codigo"] == "SIN_SESION", ruta
-    # Los encabezados de antes ya no alcanzan para entrar.
-    r = cliente.get("/api/lotes", headers={"X-Usuario-Id": "ana", "X-Usuario-Roles": "supervisor"})
-    assert r.status_code == 401
+def test_sin_rol_no_entra_a_los_lotes():
+    for ruta in ("/api/lotes", "/api/conexiones", "/api/estado/x"):
+        r = cliente.get(ruta, headers={"X-Usuario-Id": "ana", "X-Usuario-Roles": "invitado"})
+        assert r.status_code == 403 and r.json()["detail"]["codigo"] == "SIN_ROL", ruta
 
 
 def test_partidas_con_estado_y_excel_con_hojas_del_lote(ruta_arca, ruta_mayor):

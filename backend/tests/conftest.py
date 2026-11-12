@@ -1,35 +1,18 @@
-from urllib.parse import unquote
-
 import pytest
-from fastapi import Request
 from openpyxl import Workbook
 
-from app.core import seguridad
-from app.core.usuarios import ROLES, Usuario, ip_de, usuario_actual
-from app.main import app
-
-
-def _usuario_de_prueba(request: Request) -> Usuario:
-    """
-    Solo en los tests de lotes, conciliación y bots: el usuario sale de encabezados
-    X-Usuario-* (o es un supervisor por defecto). El ingreso de verdad se prueba en
-    test_auth.py con la marca `login_real`, que saca este reemplazo.
-    """
-    usuario_id = unquote(request.headers.get("x-usuario-id", "")).strip() or "tester"
-    roles = frozenset(r.strip() for r in request.headers.get("x-usuario-roles", "supervisor").split(",") if r.strip() in ROLES)
-    nombre = unquote(request.headers.get("x-usuario-nombre", "")).strip() or usuario_id
-    return Usuario(usuario_id, nombre, roles, ip_de(request), request.headers.get("user-agent", ""))
+from app.core.config import settings
 
 
 @pytest.fixture(autouse=True)
-def usuario_simulado(request):
-    seguridad.limitador_ingreso.limpiar()
-    if request.node.get_closest_marker("login_real"):
-        app.dependency_overrides.pop(usuario_actual, None)
-    else:
-        app.dependency_overrides[usuario_actual] = _usuario_de_prueba
-    yield
-    app.dependency_overrides.pop(usuario_actual, None)
+def usuario_por_defecto(monkeypatch):
+    """
+    El usuario sale de los encabezados X-Usuario-* (como lo va a mandar la página
+    principal). Sin ellos, el de la configuración: en los tests, un supervisor «tester».
+    """
+    monkeypatch.setattr(settings, "USUARIO_POR_DEFECTO_ID", "tester")
+    monkeypatch.setattr(settings, "USUARIO_POR_DEFECTO_NOMBRE", "tester")
+    monkeypatch.setattr(settings, "USUARIO_POR_DEFECTO_ROLES", "supervisor")
 
 ARCA_CSV = """Mis Retenciones - Período 10/2026
 CUIT Agente Ret./Perc.;Denominación;Impuesto;Descripción Impuesto;Régimen;Fecha Ret./Perc.;Número Certificado;Importe Ret./Perc.

@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -23,46 +22,21 @@ class Settings(BaseSettings):
     LOGO_EMPRESA: str = str(RAIZ_BACKEND / "app" / "assets" / "logos" / "logo.png")
 
     # ------------------------------------------------------------------
-    # Ingreso (ver app/core/seguridad.py y app/services/cuentas.py)
+    # Usuario (ver app/core/usuarios.py)
     # ------------------------------------------------------------------
-    # La cuenta principal: supervisor, da de alta a los demás y les resetea la
-    # contraseña. Se crea sola al arrancar; la contraseña se elige con el enlace
-    # que aparece en la consola del backend.
-    CUENTA_PRINCIPAL: str = "tito.rodriguez@estudiopiccinini.com.ar"
-    # Firma de los tokens y cifrado de los segundos factores. Vacía = se genera
-    # una y se guarda en DIRECTORIO_DATOS/.secreto. Si la cambiás se cierran
-    # todas las sesiones y hay que volver a registrar el segundo factor.
-    SECRET_KEY: str = ""
+    # No hay ingreso propio: la identidad y los roles los manda la página
+    # principal en encabezados X-Usuario-*. Sin ellos, el pedido es de este usuario.
+    USUARIO_POR_DEFECTO_ID: str = "local"
+    USUARIO_POR_DEFECTO_NOMBRE: str = "Usuario local"
+    # "empleado", "supervisor" o los dos separados por coma.
+    USUARIO_POR_DEFECTO_ROLES: str = "supervisor"
     # Para probar: un supervisor puede borrar del todo los lotes cerrados. Lo aprobado
     # es el respaldo de la DDJJ: esto va en False antes de trabajar con datos reales.
     PERMITIR_ELIMINAR_CERRADOS: bool = True
-    # Dónde abre la persona el front (para el enlace de configuración inicial).
-    # En Render, si no se define, se usa la dirección pública del servicio
-    # (RENDER_EXTERNAL_URL), que es donde el backend sirve también el front.
-    FRONT_URL: str = os.environ.get("RENDER_EXTERNAL_URL") or "http://localhost:4200"
     # Carpeta con el build del front (dist/<app>/browser). Si existe, el backend
     # sirve la app en el mismo dominio que la API (así se despliega en Render).
     # Vacía o inexistente = solo API (desarrollo con `ng serve`).
     FRONT_DIST: Path | None = None
-    # Vida del token de acceso. Se renueva solo mientras se usa la app.
-    ACCESO_MIN: int = 10
-    # Sin usar la app este tiempo, hay que volver a ingresar.
-    INACTIVIDAD_MIN: int = 60
-    # Aunque se use, a las tantas horas se vuelve a pedir la contraseña.
-    SESION_HORAS: int = 12
-    # Intentos fallidos seguidos antes de bloquear la cuenta, y por cuánto.
-    # 0 = sin bloqueo (los fallos igual quedan en la auditoría).
-    INTENTOS_MAX: int = 0
-    BLOQUEO_MIN: int = 15
-    # Límite de intentos de ingreso por conexión (20 cada 5 minutos por IP).
-    # Apagado: es una herramienta local. Conviene prenderlo si se expone a internet.
-    LIMITAR_INGRESO_IP: bool = False
-    # Segundo factor (Google Authenticator) obligatorio para los supervisores.
-    # Apagado: cada uno lo activa si quiere desde «Mi cuenta».
-    DOSFA_SUPERVISORES: bool = False
-    # Cookie de renovación solo por HTTPS. Los navegadores la aceptan igual en
-    # http://localhost; ponelo en false solo si entrás por otra IP sin HTTPS.
-    COOKIE_SECURE: bool = True
 
     # Tamano maximo por archivo subido.
     MAX_MB_ARCHIVO: int = 20

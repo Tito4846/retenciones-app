@@ -28,6 +28,11 @@ export const NOMBRES_CORTOS: Record<string, string> = {
   '219': 'Bienes Personales',
   '210': 'Ganancias RG 830',
   '939': 'Impuesto PAÍS',
+  '172': 'ITI',
+  '787': 'Ganancias 4ta categoría',
+  '218': 'Ganancias exterior',
+  '466': 'Premios',
+  '222': 'Donaciones',
 };
 
 /** Los que casi siempre tienen retenciones: se ofrecen como atajo. */

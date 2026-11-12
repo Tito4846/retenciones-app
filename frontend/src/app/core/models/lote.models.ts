@@ -10,44 +10,6 @@ export interface Usuario {
   roles: Rol[];
 }
 
-/** Una cuenta como la devuelve la API (nunca trae hashes ni secretos). */
-export interface Cuenta {
-  id: string;
-  email: string;
-  nombre: string;
-  rol: Rol;
-  principal: boolean;
-  gestiona_usuarios: boolean;
-  activo: boolean;
-  tiene_2fa: boolean;
-  /** Supervisor con el segundo factor obligatorio (DOSFA_SUPERVISORES). */
-  exige_2fa: boolean;
-  debe_cambiar_clave: boolean;
-  bloqueado: boolean;
-  codigos_recuperacion_restantes: number;
-  ultimo_ingreso_utc: string | null;
-  creado_utc: string;
-}
-
-/** Respuesta de cada paso del ingreso. */
-export interface PasoIngreso {
-  paso: 'listo' | '2fa' | 'cambiar_clave' | 'enrolar_2fa';
-  desafio?: string;
-  email?: string;
-  acceso?: string;
-  acceso_vence?: number;
-  usuario?: Cuenta;
-  codigos_recuperacion?: string[];
-  codigos_recuperacion_restantes?: number;
-}
-
-export interface Enrolamiento {
-  qr: string;
-  secreto: string;
-  uri: string;
-  desafio?: string;
-}
-
 export interface Lote {
   id: string;
   empresa: string;
@@ -169,6 +131,15 @@ export interface Partida {
   editado_utc: string | null;
   /** Lo que le falta para poder enviarse (vacío = lista). */
   faltas: string[];
+}
+
+/** Lo que se corrige de una partida desde la pantalla. */
+export interface CambioPartida {
+  justificacion?: string;
+  comentario?: string;
+  /** null borra el ajuste. */
+  importe_ajustado?: string | null;
+  excluida?: boolean;
 }
 
 export interface Adjunto {

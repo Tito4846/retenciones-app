@@ -48,6 +48,7 @@ from app.bots.chrome import (
     mostrar_ventana,
 )
 from app.bots import misret
+from app.bots.bitacora import Bitacora, tipo_de
 from app.core.config import settings
 from app.services.importador_arca import leer_arca
 from app.services.tools import ErrorDeLectura, OperacionCancelada, nunca_cancelada
@@ -412,6 +413,8 @@ class NavegadorArca:
         # Textos de los alert() de ARCA (el formulario valida con alert).
         self._avisos: list[str] = []
         self._descargas: list[Any] = []
+        # Lo que fue pasando, para el mini-log de la pantalla (solo en memoria).
+        self._bitacora = Bitacora()
 
     # ------------------------------------------------------------------ API
 
@@ -444,6 +447,7 @@ class NavegadorArca:
                 }
         with self._candado:
             self._estado, self._mensaje = CONECTANDO, "Entrando a ARCA…"
+            self._bitacora.registrar("Entrando a ARCA…", "info")
             self._cuit = cuit
             self._formulario = self._url_formulario = None
             self._cerrar = False
@@ -456,6 +460,8 @@ class NavegadorArca:
 
     def desconectar(self) -> None:
         with self._candado:
+            if self._estado != DESCONECTADO:
+                self._bitacora.registrar("Desconectado a pedido: el bot dejó de trabajar.", "info")
             self._cerrar = True
             self._estado, self._mensaje = DESCONECTADO, None
         self._cola.put(None)
@@ -629,6 +635,7 @@ class NavegadorArca:
             "formulario": self._formulario,
             "consultando": self._consultando,
             "renovando": self._renovando,
+            **self._bitacora.a_dict(),
         }
 
     def _fijar(self, estado: str, mensaje: str | None) -> None:
@@ -636,6 +643,7 @@ class NavegadorArca:
             if self._cerrar:
                 return  # se desconecto a pedido: lo que vea el hilo mientras cierra ya no cuenta
             self._estado, self._mensaje = estado, mensaje
+            self._bitacora.registrar(mensaje or ("Conectado a ARCA." if estado == CONECTADO else estado), tipo_de(estado, mensaje))
         logger.info("ARCA: %s%s", estado, f" ({mensaje})" if mensaje else "")
 
     def _bucle(self, cuit: str, sobre_clave: list[str]) -> None:
@@ -729,6 +737,9 @@ class NavegadorArca:
             return True
         vencida = misret.es_sesion_vencida(respuesta.body(), respuesta.status) or "auth.afip.gob.ar" in (respuesta.url or "")
         logger.info("ARCA: aviso al portal (HTTP %s)%s", respuesta.status, " -> sesion vencida" if vencida else "")
+        if not vencida:
+            with self._candado:
+                self._bitacora.tocar()
         return not vencida
 
     def _reabrir_con_cookies(
@@ -979,7 +990,11 @@ class NavegadorArca:
             # Bytes y no .text(): ARCA responde en Latin-1 y .text() decodifica
             # como UTF-8, falla con la primera tilde y la sesion no se renovaba.
             # Mis Retenciones vencida no muestra el login: contesta 401.
-            return not misret.es_sesion_vencida(respuesta.body(), respuesta.status)
+            viva = not misret.es_sesion_vencida(respuesta.body(), respuesta.status)
+            if viva:
+                with self._candado:
+                    self._bitacora.tocar()  # «Última actividad» en la pantalla
+            return viva
         except Exception as error:  # noqa: BLE001
             if es_cierre(error):
                 raise

@@ -40,6 +40,7 @@ from app.bots.chrome import (
     mostrar_ventana,
 )
 from app.bots import libro_mayor_xubio
+from app.bots.bitacora import Bitacora, tipo_de
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -148,6 +149,8 @@ class NavegadorXubio:
         self._cerrar = False
         # La empresa con la que se entro (la de arriba, junto a «Estudio:»).
         self._empresa_activa: str | None = None
+        # Lo que fue pasando, para el mini-log de la pantalla (solo en memoria).
+        self._bitacora = Bitacora()
 
     # ------------------------------------------------------------------ API
 
@@ -168,6 +171,7 @@ class NavegadorXubio:
                 "usuario": cuenta[0] if cuenta else None,
                 "cuenta_env": bool(settings.XUBIO_USUARIO.strip() and settings.XUBIO_CLAVE),
                 "empresa_activa": self._empresa_activa,
+                **self._bitacora.a_dict(),
             }
 
     @property
@@ -194,6 +198,7 @@ class NavegadorXubio:
                 if cuenta
                 else "Entrá con tu usuario de Xubio en la ventana de Chrome que se abrió."
             )
+            self._bitacora.registrar("Abriendo Xubio…", "info")
             self._cerrar = False
             self._cola = queue.Queue()
             self._hilo = threading.Thread(target=self._bucle, name="navegador-xubio", daemon=True)
@@ -203,6 +208,8 @@ class NavegadorXubio:
     def desconectar(self) -> None:
         """Cierra la ventana. El perfil queda: Xubio puede recordar el ingreso."""
         with self._candado:
+            if self._estado != DESCONECTADO:
+                self._bitacora.registrar("Desconectado a pedido: el bot dejó de trabajar.", "info")
             self._cerrar = True
             self._cuenta = None
             self._estado, self._mensaje = DESCONECTADO, None
@@ -294,6 +301,9 @@ class NavegadorXubio:
                 return
             if (self._estado, self._mensaje) != (estado, mensaje):
                 logger.info("Xubio: %s%s", estado, f" ({mensaje})" if mensaje else "")
+                self._bitacora.registrar(mensaje or ("Conectado a Xubio." if estado == CONECTADO else estado), tipo_de(estado, mensaje))
+            elif estado == CONECTADO:
+                self._bitacora.tocar()  # el bot volvió a ver la sesión abierta
             self._estado, self._mensaje = estado, mensaje
 
     def _olvidar_cuenta(self) -> None:

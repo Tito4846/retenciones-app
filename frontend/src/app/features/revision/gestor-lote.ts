@@ -1,15 +1,15 @@
-import { Component, ElementRef, computed, inject, input, model, viewChild } from '@angular/core';
+import { Component, ElementRef, computed, inject, input, viewChild } from '@angular/core';
 import { DetalleLote } from '../../core/models/lote.models';
 import { LotesStore } from '../../core/services/lotes.store';
 import { EntregaLote } from './entrega-lote';
-import { EvidenciaLote } from './evidencia-lote';
 import { ExcepcionesLote } from './excepciones-lote';
+import { contarSinCompletar } from './revision.reglas';
 import { CONCILIADO } from './revision.util';
 
-/** El trabajo del lote: se baja el Excel, se completa afuera, se sube y se adjuntan los comprobantes. */
+/** El trabajo del lote: cada excepción se resuelve en su fila; el Excel sigue para los cambios en bloque. */
 @Component({
   selector: 'app-gestor-lote',
-  imports: [EntregaLote, EvidenciaLote, ExcepcionesLote],
+  imports: [EntregaLote, ExcepcionesLote],
   host: { class: 'block space-y-3' },
   template: `
     @let det = detalle();
@@ -42,7 +42,7 @@ import { CONCILIADO } from './revision.util';
       }
       @if (editar()) {
         <details class="mt-2 text-xs text-muted">
-          <summary class="cursor-pointer font-semibold hover:text-brand-700">Cómo completar el Excel</summary>
+          <summary class="cursor-pointer font-semibold hover:text-brand-700">Cambios en bloque con el Excel</summary>
           <p class="mt-1">
             En la hoja RESUMEN está la vista general. En CONCILIACION, lo que falta va arriba: completá Justificación y Comentario. Para llevar la diferencia a cero usá Importe ajustado, o poné Sí en Excluida contando el motivo.
           </p>
@@ -70,17 +70,6 @@ import { CONCILIADO } from './revision.util';
       }
     </section>
 
-    @if (editar()) {
-      @if (revisar()) {
-        <details class="rounded-xl border border-line bg-white px-3 py-2">
-          <summary class="cursor-pointer text-sm font-semibold">Sumar comprobantes</summary>
-          <app-evidencia-lote class="mt-2" [revisar]="true" [(archivos)]="evidencia" />
-        </details>
-      } @else {
-        <app-evidencia-lote [revisar]="false" [(archivos)]="evidencia" />
-      }
-    }
-
     <!-- Lo principal del lote: va suelto y entero, sin caja ni scroll propio -->
     <section>
       <h3 class="text-base font-semibold" [class]="porResolver() ? 'text-amber-800' : 'text-emerald-700'">
@@ -93,7 +82,7 @@ import { CONCILIADO } from './revision.util';
         }
       </h3>
       @if (excepciones().length) {
-        <app-excepciones-lote [partidas]="excepciones()" [editar]="editar()" />
+        <app-excepciones-lote [partidas]="excepciones()" [adjuntos]="det.adjuntos" [loteId]="det.lote.id" [version]="det.lote.version_vigente" [editar]="editar()" />
       }
     </section>
   `,
@@ -105,7 +94,6 @@ export class GestorLote {
   /** Le toca trabajarlo a quien mira: el que prepara, o el supervisor que corrige en revisión. */
   readonly editar = input(false);
   readonly revisar = input(false);
-  readonly evidencia = model<File[]>([]);
 
   private readonly selector = viewChild<ElementRef<HTMLInputElement>>('selector');
   /** Cerrado y aprobado: el Excel de la versión vigente es el definitivo. */
@@ -114,7 +102,7 @@ export class GestorLote {
   protected readonly conciliadas = computed(() => this.detalle().partidas.filter((p) => p.estado === CONCILIADO).length);
   /** Todo lo que no concilió solo: el supervisor tiene que poder leer también lo ya justificado. */
   protected readonly excepciones = computed(() => this.detalle().partidas.filter((p) => p.estado !== CONCILIADO));
-  protected readonly porResolver = computed(() => this.excepciones().filter((p) => !p.excluida && p.faltas.length).length);
+  protected readonly porResolver = computed(() => contarSinCompletar(this.excepciones(), this.detalle().adjuntos, this.store.catalogo()));
 
   protected descargar(): void {
     const v = this.vigente();

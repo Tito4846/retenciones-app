@@ -183,3 +183,36 @@ def test_quitar_respeta_los_pares_hechos_a_mano(ruta_arca, ruta_mayor):
 def test_emparejar_conciliacion_inexistente():
     respuesta = cliente.post("/api/conciliacion/no-existe/pares", json={"arca_id": "a0", "mayor_id": "m0"})
     assert respuesta.status_code == 404
+
+
+# ----------------------------------------------------------------------
+# Usuario: lo manda la página principal (encabezados X-Usuario-*)
+# ----------------------------------------------------------------------
+
+
+def test_yo_con_los_encabezados_de_la_pagina_principal():
+    r = cliente.get("/api/yo", headers={"X-Usuario-Id": "u-42", "X-Usuario-Nombre": "Ana%20P%C3%A9rez", "X-Usuario-Roles": "empleado, supervisor"})
+    assert r.status_code == 200
+    assert r.json() == {"id": "u-42", "nombre": "Ana Pérez", "roles": ["empleado", "supervisor"]}
+
+
+def test_yo_sin_encabezados_es_el_usuario_por_defecto():
+    assert cliente.get("/api/yo").json() == {"id": "tester", "nombre": "tester", "roles": ["supervisor"]}
+
+
+def test_sin_un_rol_valido_no_entra():
+    r = cliente.get("/api/yo", headers={"X-Usuario-Id": "u-1", "X-Usuario-Roles": "admin"})
+    assert r.status_code == 403
+    assert r.json()["detail"]["codigo"] == "SIN_ROL"
+    # Las demás rutas también lo frenan.
+    assert cliente.get("/api/conexiones", headers={"X-Usuario-Id": "u-1", "X-Usuario-Roles": ""}).status_code == 403
+
+
+def test_no_hay_rutas_de_ingreso():
+    assert cliente.post("/api/auth/ingresar", json={"email": "a@b.c", "clave": "x"}).status_code in (404, 405)
+
+
+def test_encabezados_de_seguridad():
+    r = cliente.get("/api/salud")
+    assert r.headers["X-Content-Type-Options"] == "nosniff"
+    assert r.headers["X-Frame-Options"] == "DENY"

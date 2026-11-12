@@ -1,9 +1,8 @@
-import { Component, computed, inject, signal } from '@angular/core';
-import { toSignal } from '@angular/core/rxjs-interop';
-import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
-import { filter, map } from 'rxjs';
+import { Component, inject, signal } from '@angular/core';
+import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
+import { Usuario } from './core/models/lote.models';
 import { LotesStore } from './core/services/lotes.store';
-import { SesionService } from './core/services/sesion.service';
+import { SesionService, USUARIOS_DE_PRUEBA } from './core/services/sesion.service';
 
 const CLAVE_MENU = 'retenciones.menu_plegado';
 
@@ -25,17 +24,11 @@ export class App {
   /** Para el contador de la bandeja de revisión en el menú. */
   protected readonly lotes = inject(LotesStore);
   protected readonly sesion = inject(SesionService);
-  private readonly router = inject(Router);
+  protected readonly usuariosDePrueba = USUARIOS_DE_PRUEBA;
 
-  private readonly url = toSignal(
-    this.router.events.pipe(
-      filter((e) => e instanceof NavigationEnd),
-      map((e) => (e as NavigationEnd).urlAfterRedirects),
-    ),
-    { initialValue: '' },
-  );
-  /** Ingresar y configurar van a pantalla completa, sin el menú. */
-  protected readonly sinMenu = computed(() => !this.sesion.usuario() || /^\/(ingresar|configurar)/.test(this.url()));
+  protected rolesDe(u: Usuario): string {
+    return u.roles.map((r) => (r === 'supervisor' ? 'Supervisor' : 'Empleado')).join(' · ') || 'Sin rol';
+  }
 
   /** Menú plegado (solo íconos). Se recuerda en este navegador. */
   protected readonly plegada = signal(leerPlegada());

@@ -333,9 +333,6 @@ def _conectar() -> sqlite3.Connection:
             from app.services import migracion
 
             migracion.migrar_revisiones_json(conexion)
-            from app.services import cuentas
-
-            cuentas.asegurar_principal(conexion)
     return conexion
 
 

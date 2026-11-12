@@ -34,4 +34,4 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-markers = ["login_real: usa el ingreso de verdad (sin el usuario simulado de los tests)"]
+

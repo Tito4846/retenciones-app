@@ -168,49 +168,30 @@ Los datos viven en `backend/datos/retenciones.db` y los archivos en `backend/dat
 **supervisor** hace todo eso y además revisa, aprueba o devuelve y se pasa un lote que tiene otro supervisor.
 Nadie aprueba un lote que preparó.
 
-## Ingreso y usuarios
+## Usuarios y roles
 
-Toda la app pide ingresar con correo y contraseña (salvo `/api/salud`).
+El módulo **no tiene ingreso propio**: quién es la persona y qué roles tiene los va a dar la
+**página principal** (el portal desde donde se abre). El contrato es que cada pedido a la API
+traiga estos encabezados (`backend/app/core/usuarios.py`):
 
-**Primera vez.** La cuenta principal es `CUENTA_PRINCIPAL` (por defecto `tito.rodriguez@estudiopiccinini.com.ar`), supervisor.
-Al arrancar, si todavía no tiene contraseña, el backend muestra en la consola un enlace de un solo uso
-(`http://localhost:4200/configurar#…`, vence a las 24 h). Se abre, se elige la contraseña y listo.
-El segundo factor (Google Authenticator) es opcional y se activa desde **Mi cuenta**. Si el enlace se perdió:
+| Encabezado | Qué lleva |
+|---|---|
+| `X-Usuario-Id` | Identificador estable de la persona (queda en los lotes y la auditoría) |
+| `X-Usuario-Nombre` | Cómo se muestra (URL-encoded si lleva acentos) |
+| `X-Usuario-Roles` | `empleado`, `supervisor` o los dos separados por coma |
 
-```bash
-cd backend
-uv run python -m app.cli enlace-principal
-```
+Sin encabezados, el pedido es del usuario por defecto (`USUARIO_POR_DEFECTO_*` en el `.env`,
+un supervisor «Usuario local»). Sin un rol válido, la API responde 403. `GET /api/yo` devuelve
+quién es y sus roles: con eso el front arma el menú.
 
-**Usuarios.** La cuenta principal da de alta a los demás en **Usuarios** (correo, nombre y rol): le aparece una
-contraseña temporal que se ve una sola vez y que la persona cambia al entrar. Desde ahí también resetea
-contraseñas y segundos factores, desbloquea, cambia roles y da de baja (las cuentas no se borran: quedan en la
-auditoría). Puede habilitar a otro supervisor a gestionar usuarios. Cada uno cambia su contraseña y activa o
-desactiva su segundo factor en **Mi cuenta** (opcional; con `DOSFA_SUPERVISORES=true` pasa a ser obligatorio para los supervisores).
+**Mientras la página principal no esté conectada**, en el menú hay un selector **Usuario de
+prueba** (empleado, supervisor y otro supervisor) para probar los dos roles y el circuito de
+revisión. Para conectarla, en `frontend/src/app/core/services/sesion.service.ts` se reemplaza la
+identidad del selector por la que entregue la página principal; el resto no cambia.
 
-**Si la cuenta principal pierde la contraseña o el celular** (y los códigos de recuperación), quien tiene acceso al
-servidor la reinicia: borra su contraseña y su segundo factor y muestra un enlace nuevo.
-
-```bash
-cd backend
-uv run python -m app.cli reiniciar-principal
-```
-
-**Cómo está protegido** (`backend/app/core/seguridad.py`, `backend/app/services/cuentas.py`):
-
-- Contraseñas con **Argon2id**; mínimo 10 caracteres, sin el correo ni el nombre, no las más comunes.
-- **Token de acceso** JWT firmado (HS256), de 10 minutos, solo en memoria del navegador (nunca en localStorage).
-  Cada pedido además consulta la cuenta: dar de baja, cambiar el rol o la contraseña corta el acceso en el acto.
-- **Token de renovación** en cookie `HttpOnly`, `Secure`, `SameSite=Strict`, limitada a `/api/auth`; se rota en
-  cada uso y, si alguien reusa uno viejo, se cierra toda la sesión. Vence a los 60 minutos sin uso y a las 12 horas.
-  `/renovar` y `/salir` exigen además el encabezado `X-Requested-With` y un origen permitido (CSRF).
-- **Segundo factor** TOTP (RFC 6238), con el secreto cifrado en la base y sin aceptar dos veces el mismo código;
-  10 códigos de recuperación de un solo uso (guardados como HMAC).
-- **Intentos:** sin espera ni bloqueo por defecto (los fallos quedan en la auditoría). Se puede prender: `INTENTOS_MAX` (fallos seguidos que bloquean la cuenta `BLOQUEO_MIN` minutos) y `LIMITAR_INGRESO_IP=true` (20 intentos cada 5 minutos por IP). Conviene prenderlos si la app se expone a internet.
-  El error es siempre «Correo o contraseña incorrectos» (no se puede averiguar qué correos tienen cuenta).
-- Todo queda en la **auditoría** encadenada: ingresos, fallos, bloqueos, salidas, altas, reseteos y reusos de token.
-- La clave del servidor (`SECRET_KEY`) se genera sola en `backend/datos/.secreto` (fuera de git). Fuera de
-  localhost, servilo detrás de HTTPS.
+> **Antes de exponer el módulo a internet:** cualquiera puede mandar esos encabezados. La página
+> principal tiene que ponerlos detrás de un proxy propio (que pise lo que mande el navegador) o
+> mandarlos firmados, y el backend validarlo.
 
 ## Tests
 
@@ -235,23 +216,19 @@ npm run serve:ssr:retenciones-frontend
 ## Despliegue en Render
 
 El repo trae un `Dockerfile` y un `render.yaml` (Blueprint). Es **un solo servicio**: la
-imagen compila el front y el backend lo sirve en el mismo dominio que la API (`/api`), así
-la cookie de sesión (`SameSite=Strict`) funciona sin CORS.
+imagen compila el front y el backend lo sirve en el mismo dominio que la API (`/api`), sin CORS.
 
 1. Subir el repo a GitHub/GitLab.
 2. En Render: **New → Blueprint**, elegir el repo. Crea el servicio `retenciones` con un
-   **disco persistente** en `/var/data` (base SQLite, archivos y `.secreto`). El disco
+   **disco persistente** en `/var/data` (base SQLite y archivos). El disco
    requiere plan pago (`starter`); sin disco, todo se borra en cada deploy.
 3. Completar en el panel `EMPRESA` y, si se usan, `XUBIO_USUARIO` / `XUBIO_CLAVE`.
-4. Primer arranque: en **Logs** aparece el enlace `https://<servicio>.onrender.com/configurar#…`
-   para la contraseña de la cuenta principal (si se perdió, en **Shell**:
-   `python -m app.cli enlace-principal`).
+4. Mientras no esté conectada la página principal, el servicio queda **abierto** (ver Usuarios y
+   roles): no lo dejes público con datos reales.
 
 Detalles:
 
-- `FRONT_URL` toma sola la dirección pública (`RENDER_EXTERNAL_URL`).
-- El blueprint prende `LIMITAR_INGRESO_IP` e `INTENTOS_MAX=5`. Antes de cargar datos reales,
-  poné `PERMITIR_ELIMINAR_CERRADOS=false`.
+- Antes de cargar datos reales, poné `PERMITIR_ELIMINAR_CERRADOS=false`.
 - **Bots:** la imagen trae Google Chrome y una pantalla virtual (Xvfb), pero en el servidor
   **nadie ve la ventana**: el doble factor de ARCA y el captcha de Xubio no se pueden
   completar. Funcionan solo las cuentas sin esos pasos; si no, usar la importación de archivos

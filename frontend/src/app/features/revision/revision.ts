@@ -1,5 +1,5 @@
 import { DatePipe } from '@angular/common';
-import { Component, computed, inject, linkedSignal, signal } from '@angular/core';
+import { Component, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { LotesStore } from '../../core/services/lotes.store';
@@ -10,12 +10,14 @@ import { GestorLote } from './gestor-lote';
 import { HistorialLote } from './historial-lote';
 import { MarcadorCruce } from './marcador-cruce';
 import { SeguimientoLote } from './seguimiento-lote';
-import { centavos, CONCILIADO, ESTADOS, periodo, Permisos, pesos } from './revision.util';
+import { contarSinCompletar, motivosSinAprobar } from './revision.reglas';
+import { centavos, ESTADOS, periodo, Permisos, pesos } from './revision.util';
 import { VersionesLote } from './versiones-lote';
 
 /**
- * Verificación y aprobación: bandeja a la izquierda, lote a la derecha. El trabajo
- * se hace en el Excel: acá se baja, se sube y se adjuntan los comprobantes.
+ * Verificación y aprobación: bandeja a la izquierda, lote a la derecha. Cada
+ * excepción se ajusta, descarta o respalda en su fila; el Excel queda para los
+ * cambios en bloque. Las reglas (colores, trabas, avance) están en revision.reglas.
  */
 @Component({
   selector: 'app-revision',
@@ -41,11 +43,6 @@ export class RevisionPantalla {
       if (lote) this.seleccionId.set(lote);
     });
   }
-  private readonly loteId = computed(() => this.d()?.lote.id ?? null);
-
-  /** Comprobantes a la espera de confirmar. */
-  protected readonly evidencia = linkedSignal<string | null, File[]>({ source: this.loteId, computation: () => [] });
-
   protected readonly permisos = computed<Permisos>(() => {
     const lote = this.d()?.lote;
     const yo = this.sesion.usuario()?.id ?? '';
@@ -70,12 +67,30 @@ export class RevisionPantalla {
     return { sistema: centavos(t?.sistema), declarado: centavos(t?.declarado), neta: centavos(t?.neta) };
   });
 
-  private readonly pendientes = computed(() => (this.d()?.partidas ?? []).filter((p) => !p.excluida && p.estado !== CONCILIADO && p.faltas.length).length);
+  /** Las excepciones en rojo o amarillo: la misma cuenta que pinta la tabla. */
+  private readonly pendientes = computed(() => {
+    const d = this.d();
+    return d ? contarSinCompletar(d.partidas, d.adjuntos, this.store.catalogo()) : 0;
+  });
 
   protected readonly ultimoRechazo = computed(() => [...(this.d()?.decisiones ?? [])].reverse().find((x) => x.tipo === 'rechazo') ?? null);
 
   protected readonly trabasEnviar = computed(() => (this.d()?.compuertas.enviar ?? []).map((e) => e.mensaje));
-  protected readonly trabasAprobar = computed(() => (this.d()?.compuertas.aprobar ?? []).map((e) => e.mensaje));
+  /**
+   * Poka-yoke del cierre: además de lo que traba el servidor, no se aprueba con
+   * diferencia neta ni con excepciones sin completar, ni lo que uno mismo preparó.
+   */
+  protected readonly trabasAprobar = computed(() =>
+    motivosSinAprobar(
+      {
+        neta: this.totales().neta,
+        sinCompletar: this.pendientes(),
+        autor: this.permisos().autor,
+        trabas: (this.d()?.compuertas.aprobar ?? []).map((e) => e.mensaje),
+      },
+      pesos,
+    ),
+  );
 
   /** Sin el lote borrado en la dirección: al recargar intentaría abrirlo. */
   protected alEliminar(): void {
@@ -89,7 +104,7 @@ export class RevisionPantalla {
     if (this.totales().neta) lista.push(`diferencia neta de ${pesos(this.totales().neta / 100)}`);
     const n = this.pendientes();
     if (n) lista.push(`${n} ${n === 1 ? 'excepción' : 'excepciones'} sin completar`);
-    if (this.d()?.pendientes.some((e) => e.codigo === 'SIN_RESPALDO') && !this.evidencia().length) lista.push('sin comprobantes');
+    if (this.d()?.pendientes.some((e) => e.codigo === 'SIN_RESPALDO')) lista.push('sin comprobantes');
     return lista;
   });
 }

@@ -1,4 +1,4 @@
-<header class="mb-8 flex items-start gap-4">
+<header class="mb-4 flex items-start gap-4">
   <div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-700">
     <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
       <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /><path d="M12 17v-6" /><path d="m9 14 3-3 3 3" />
@@ -12,18 +12,20 @@
   </div>
 </header>
 
-<!-- Los 4 pasos: los bots los hacen solos, o se bajan los archivos a mano -->
-<ol class="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-  @for (paso of pasos; track paso.titulo; let i = $index) {
-    <li class="flex gap-3 rounded-xl border border-line bg-white p-4">
-      <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-50 text-sm font-bold text-brand-700">{{ i + 1 }}</span>
-      <div>
-        <p class="font-semibold">{{ paso.titulo }}</p>
-        <p class="mt-0.5 text-sm text-muted">{{ paso.ayuda }}</p>
-      </div>
-    </li>
-  }
-</ol>
+<!-- Los 4 pasos: guardados por defecto, quien ya usa la pantalla no los necesita -->
+<app-plegable class="mb-4" titulo="Cómo funciona la importación">
+  <ol class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+    @for (paso of pasos; track paso.titulo; let i = $index) {
+      <li class="flex gap-3 rounded-xl border border-line bg-white p-4">
+        <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-50 text-sm font-bold text-brand-700">{{ i + 1 }}</span>
+        <div>
+          <p class="font-semibold">{{ paso.titulo }}</p>
+          <p class="mt-0.5 text-sm text-muted">{{ paso.ayuda }}</p>
+        </div>
+      </li>
+    }
+  </ol>
+</app-plegable>
 
 <!-- Automático: los bots traen todo -->
 <app-consulta-arca />
@@ -51,18 +53,19 @@
 }
 
 <!-- Manual: subir los archivos -->
-<div class="mt-10 mb-4 flex items-center gap-3">
+<!-- Plan B: compacto a propósito, la vía preferida es la consulta automática de arriba -->
+<div class="mt-8 mb-3 flex items-center gap-3">
   <span class="text-xs font-semibold tracking-wider text-muted uppercase">O subí los archivos a mano</span>
   <span class="h-px flex-1 bg-line"></span>
 </div>
 
-<div class="grid gap-6 lg:grid-cols-2">
+<div class="grid gap-3 lg:grid-cols-2">
   @for (zona of zonas(); track zona.tipo) {
-    <section class="rounded-2xl border border-line bg-white p-6">
-      <h2 class="mb-4 text-lg font-semibold">{{ zona.titulo }}</h2>
+    <section class="rounded-xl border border-line bg-white p-3">
+      <h2 class="mb-2 px-1 text-sm font-semibold">{{ zona.titulo }}</h2>
 
       @if (zona.archivo; as archivo) {
-        <div class="flex items-center gap-3 rounded-xl border border-line bg-canvas px-4 py-3">
+        <div class="flex items-center gap-3 rounded-lg border border-line bg-canvas px-3 py-2">
           <svg class="h-5 w-5 shrink-0 text-brand-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
             <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" />
           </svg>
@@ -84,14 +87,18 @@
           (dragover)="onDragOver($event, zona.tipo)"
           (dragleave)="arrastrando.set(null)"
           (drop)="onDrop($event, zona.tipo)"
-          class="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-10 text-center transition-colors"
+          class="flex cursor-pointer items-center gap-3 rounded-lg border border-dashed px-3 py-2 text-left transition-colors focus-within:ring-2 focus-within:ring-brand-400"
           [class]="arrastrando() === zona.tipo ? 'border-brand-400 bg-brand-50' : 'border-line hover:border-brand-300 hover:bg-brand-50/50'"
+          [appAyuda]="zona.ayuda"
         >
-          <svg class="mb-3 h-8 w-8 text-brand-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <svg class="h-5 w-5 shrink-0 text-brand-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="m17 8-5-5-5 5" /><path d="M12 3v12" />
           </svg>
-          <span class="font-semibold text-brand-700">Elegí un archivo o arrastralo acá</span>
-          <span class="mt-1 text-sm text-muted">{{ zona.ayuda }}</span>
+          <span class="min-w-0 flex-1 text-sm">
+            <span class="font-semibold text-brand-700">Elegí un archivo</span>
+            <span class="text-muted"> o arrastralo acá</span>
+          </span>
+          <span class="shrink-0 text-xs text-muted">{{ zona.formatos }}</span>
           <input type="file" class="sr-only" [accept]="zona.accept" (change)="onArchivoSeleccionado($event, zona.tipo)" />
         </label>
       }

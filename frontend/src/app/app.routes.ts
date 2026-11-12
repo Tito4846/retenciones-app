@@ -1,50 +1,29 @@
 import { Routes } from '@angular/router';
-import { conSesion, gestionaUsuarios, sinSesion } from './core/services/guardias';
 
+/**
+ * Sin pantallas de ingreso: quién es y qué roles tiene lo da la página principal
+ * (ver core/services/sesion.service.ts). Los permisos se controlan en el backend.
+ */
 export const routes: Routes = [
+  { path: '', pathMatch: 'full', redirectTo: 'importar' },
   {
-    path: 'ingresar',
-    canActivate: [sinSesion],
-    loadComponent: () => import('./features/ingreso/ingreso').then((m) => m.Ingreso),
+    path: 'importar',
+    loadComponent: () => import('./features/importar/importar').then((m) => m.Importar),
   },
   {
-    path: 'configurar',
-    canActivate: [sinSesion],
-    loadComponent: () => import('./features/ingreso/configurar').then((m) => m.Configurar),
+    path: 'conciliacion',
+    loadComponent: () => import('./features/conciliacion/conciliacion').then((m) => m.Conciliacion),
   },
   {
-    path: '',
-    canActivateChild: [conSesion],
-    children: [
-      { path: '', pathMatch: 'full', redirectTo: 'importar' },
-      {
-        path: 'importar',
-        loadComponent: () => import('./features/importar/importar').then((m) => m.Importar),
-      },
-      {
-        path: 'conciliacion',
-        loadComponent: () => import('./features/conciliacion/conciliacion').then((m) => m.Conciliacion),
-      },
-      {
-        // Las dos perspectivas en la misma pantalla: el empleado ve sus lotes para
-        // verificar y enviar; el supervisor, las solicitudes de revisión de todos.
-        path: 'revision',
-        loadComponent: () => import('./features/revision/revision').then((m) => m.RevisionPantalla),
-      },
-      {
-        path: 'conexiones',
-        loadComponent: () => import('./features/conexiones/conexiones').then((m) => m.Conexiones),
-      },
-      {
-        path: 'cuenta',
-        loadComponent: () => import('./features/cuenta/cuenta').then((m) => m.MiCuenta),
-      },
-      {
-        path: 'usuarios',
-        canActivate: [gestionaUsuarios],
-        loadComponent: () => import('./features/usuarios/usuarios').then((m) => m.Usuarios),
-      },
-    ],
+    // Las dos perspectivas en la misma pantalla: el empleado ve sus lotes para
+    // verificar y enviar; el supervisor, las solicitudes de revisión de todos.
+    path: 'revision',
+    loadComponent: () => import('./features/revision/revision').then((m) => m.RevisionPantalla),
   },
+  {
+    path: 'conexiones',
+    loadComponent: () => import('./features/conexiones/conexiones').then((m) => m.Conexiones),
+  },
+  // Enlaces viejos (ingresar, configurar, cuenta, usuarios) van al inicio.
   { path: '**', redirectTo: '' },
 ];

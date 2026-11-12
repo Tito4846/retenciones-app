@@ -332,16 +332,21 @@ def conciliar_retenciones(
         arca, mayor, [i for i in range(len(arca)) if i not in pares], del_periodo, tolerancia
     )
 
+    def suma(filas: list[dict], campo: str = "importe") -> Decimal:
+        return sum((dec(f[campo]) for f in filas), Decimal("0"))
+
     def total(filas: list[dict], campo: str = "importe") -> float:
-        return float(sum((dec(f[campo]) for f in filas), Decimal("0")))
+        return float(suma(filas, campo))
 
     detalle = {
         "conciliados": conciliados,
         "faltan_en_arca": faltan_en_arca,
         "faltan_en_mayor": faltan_en_mayor,
     }
-    importe_arca = total(conciliados) + total(faltan_en_mayor)
-    importe_mayor = total(conciliados, "importe_mayor") + total(faltan_en_arca)
+    # En Decimal hasta el final: sumar los dos grupos como float arrastraba
+    # error (0.1 + 0.2 = 0.30000000000000004) a la API, la pantalla y el lote.
+    importe_arca = suma(conciliados) + suma(faltan_en_mayor)
+    importe_mayor = suma(conciliados, "importe_mayor") + suma(faltan_en_arca)
     resumen = {
         "total_conciliados": len(conciliados),
         "total_faltan_en_arca": len(faltan_en_arca),
@@ -352,9 +357,9 @@ def conciliar_retenciones(
         "importe_faltan_en_arca": total(faltan_en_arca),
         "importe_faltan_en_mayor": total(faltan_en_mayor),
         # Lo que dice cada lado y cuanto difieren: es el control de la DDJJ.
-        "importe_arca": importe_arca,
-        "importe_mayor": importe_mayor,
-        "diferencia": float(dec(importe_arca) - dec(importe_mayor)),
+        "importe_arca": float(importe_arca),
+        "importe_mayor": float(importe_mayor),
+        "diferencia": float(importe_arca - importe_mayor),
         "total_arca": len(arca),
         "total_mayor": len(conciliados) + len(faltan_en_arca),
         "fuera_de_periodo": fuera_de_periodo,

@@ -22,21 +22,13 @@
   <p class="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{{ mensaje }}</p>
 }
 
-@if (lotes.errorCruce(); as e) {
-  <p class="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-900" role="alert">{{ e.mensaje }}</p>
+<!-- Un solo aviso, delgado y que se puede cerrar: nada de esto frena el trabajo -->
+@if (avisosArriba().length && !tabla.avisosCerrados()) {
+  <app-alerta class="mb-4" [mensajes]="avisosArriba()" [descartable]="true" (cerrado)="cerrarAvisos()"
+    [titulo]="store.avisos().length ? 'Revisá que los dos archivos sean del mismo cruce' : ''" />
 }
 
 @if (store.resumen(); as r) {
-  @if (store.avisos().length) {
-    <section class="mb-6 rounded-2xl border border-amber-300 bg-amber-50 p-5">
-      <p class="font-semibold text-amber-900">Revisá que los dos archivos sean del mismo cruce</p>
-      <ul class="mt-2 list-disc space-y-1 pl-5 text-sm text-amber-900">
-        @for (aviso of store.avisos(); track aviso) {
-          <li>{{ aviso }}</li>
-        }
-      </ul>
-    </section>
-  }
 
   <!-- Resumen financiero -->
   @let dif = r.diferencia ?? 0;
@@ -249,14 +241,12 @@
           </button>
         </div>
       </div>
-      <p class="-mt-2 px-6 pb-3 text-xs text-muted">
-        Hacé clic en una fecha, nombre, comprobante o importe para corregirlo, o en el tacho para quitar el movimiento.
-        @if (pendientes()) {
-          <span class="font-semibold text-amber-700">Hay cambios sin guardar: guardalos para que cuenten en el resumen y en el Excel.</span>
-        } @else {
-          Al guardar, el resumen y el Excel se rehacen con los cambios.
-        }
-      </p>
+      <!-- Sin instrucciones: las celdas editables se delatan solas al pasar el mouse -->
+      @if (pendientes()) {
+        <p class="-mt-2 px-6 pb-3 text-xs font-semibold text-amber-700" role="status">
+          Hay cambios sin guardar: guardalos para que cuenten en el resumen y en el Excel.
+        </p>
+      }
       @if (store.errorGuardado()) {
         <p class="mx-6 mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{{ store.errorGuardado() }}</p>
       }
@@ -332,7 +322,10 @@
         </th>
       </ng-template>
 
-      <!-- Celda editable: se ve como texto (con lo buscado en amarillo) y al hacer clic es un input -->
+      <!--
+        Celda editable: se ve como texto (con lo buscado en amarillo) y al hacer clic es un input.
+        Al pasar sobre la fila (group/fila) se dibuja un borde sutil y un lápiz chico: se nota que se puede tocar.
+      -->
       <ng-template #editable let-item let-campo="campo" let-texto="texto" let-clase="clase">
         @if (enEdicion(item, campo)) {
           <input
@@ -356,13 +349,23 @@
             type="button"
             (click)="$event.stopPropagation(); editar(item, campo)"
             [disabled]="!item.id"
-            class="-mx-1.5 block max-w-full rounded px-1.5 py-0.5 text-left transition-colors hover:bg-brand-50 disabled:hover:bg-transparent {{ clase ?? '' }}"
+            class="group/celda -mx-1.5 inline-flex max-w-full items-center gap-1 rounded px-1.5 py-0.5 text-left ring-1 ring-transparent transition-colors ring-inset hover:bg-brand-50 hover:ring-brand-300 focus-visible:ring-brand-400 focus-visible:outline-none disabled:hover:bg-transparent group-hover/fila:ring-slate-300 {{ clase ?? '' }}"
             [class.w-full]="campo === 'importe'"
+            [class.justify-end]="campo === 'importe'"
             [class.underline]="editado(item, campo)"
             [class.decoration-dotted]="editado(item, campo)"
             [class.decoration-brand-400]="editado(item, campo)"
-            [title]="editado(item, campo) ? 'Editado a mano · clic para cambiarlo' : 'Clic para editar'"
-          ><ng-container *ngTemplateOutlet="resaltado; context: { $implicit: texto }" /></button>
+            [title]="editado(item, campo) ? 'Editado a mano · clic para cambiarlo' : 'Editar'"
+          >
+            <span class="min-w-0"><ng-container *ngTemplateOutlet="resaltado; context: { $implicit: texto }" /></span>
+            @if (item.id) {
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                class="h-3 w-3 shrink-0 text-slate-400 opacity-0 transition-opacity group-hover/fila:opacity-100 group-focus-visible/celda:opacity-100"
+                [class.opacity-100]="editado(item, campo)">
+                <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+              </svg>
+            }
+          </button>
         }
       </ng-template>
 
@@ -479,7 +482,7 @@
               @let quitada = eliminado(item);
               <tr
                 (click)="alternarDesplegada(item)"
-                class="cursor-pointer border-t border-line transition-colors"
+                class="group/fila cursor-pointer border-t border-line transition-colors"
                 [class]="responsable ? 'bg-red-50/70 text-red-800 hover:bg-red-50' : abierta ? 'bg-canvas/60' : 'hover:bg-canvas/50'"
                 [class.opacity-50]="quitada"
                 [class.line-through]="quitada"
@@ -506,7 +509,7 @@
                   <ng-container *ngTemplateOutlet="editable; context: { $implicit: item, campo: 'fecha', texto: fechaCorta(item.fecha) }" />
                 </td>
                 <td class="px-4 py-3.5 align-top font-mono text-[13px] break-words">
-                  <ng-container *ngTemplateOutlet="resaltado; context: { $implicit: comprobante(item) }" />
+                  <ng-container *ngTemplateOutlet="editable; context: { $implicit: item, campo: campoComprobante(), texto: comprobante(item) }" />
                 </td>
                 <td class="px-4 py-3.5 align-top font-mono text-[13px]">
                   <ng-container *ngTemplateOutlet="resaltado; context: { $implicit: item.cuit || '—' }" />
@@ -550,22 +553,35 @@
                     </button>
                   </td>
                 }
-                <td class="py-3 pr-4 text-right align-top">
-                  <button
-                    type="button"
-                    (click)="$event.stopPropagation(); alternarEliminado(item)"
-                    [disabled]="!item.id"
-                    class="grid h-8 w-8 place-items-center rounded-lg no-underline transition-colors"
-                    [class]="quitada ? 'bg-brand-50 text-brand-700 hover:bg-brand-100' : 'text-muted hover:bg-red-50 hover:text-red-700'"
-                    [title]="quitada ? 'No quitar' : 'Quitar este movimiento (al guardar)'"
-                    [attr.aria-label]="quitada ? 'No quitar' : 'Quitar'"
-                  >
-                    @if (quitada) {
-                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6" /><path d="M21 17a9 9 0 0 0-15-6.7L3 13" /></svg>
-                    } @else {
-                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg>
-                    }
-                  </button>
+                <td class="py-3 pr-4 text-right align-top no-underline">
+                  @if (item.criterio === 'manual' && item.id && !quitada) {
+                    <!-- Par hecho a mano: se separa (vuelve a sus bandejas), no se borra nada -->
+                    <span class="inline-flex" appAyuda="Deshacer conciliación: el par se separa y cada movimiento vuelve a su bandeja">
+                      <button type="button" (click)="$event.stopPropagation(); store.desemparejar(item.id)" [disabled]="!!store.emparejando()"
+                        class="grid h-8 w-8 place-items-center rounded-lg text-muted transition-colors hover:bg-amber-50 hover:text-amber-700 disabled:opacity-40"
+                        aria-label="Deshacer conciliación">
+                        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                          <path d="m18.8 12.7 1.4-1.4a5 5 0 0 0-7.1-7.1l-1.4 1.4M5.2 11.3l-1.4 1.4a5 5 0 0 0 7.1 7.1l1.4-1.4M8 2v3M2 8h3M16 22v-3M22 16h-3" />
+                        </svg>
+                      </button>
+                    </span>
+                  } @else if (quitada) {
+                    <button type="button" (click)="$event.stopPropagation(); alternarEliminado(item)" appAyuda="No quitar: vuelve a contar al guardar"
+                      class="grid h-8 w-8 place-items-center rounded-lg bg-brand-50 text-brand-700 transition-colors hover:bg-brand-100" aria-label="No quitar">
+                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7v6h6" /><path d="M21 17a9 9 0 0 0-15-6.7L3 13" /></svg>
+                    </button>
+                  } @else {
+                    <!-- Quitar sí borra el movimiento del cruce (al guardar): se confirma -->
+                    <app-popconfirm [abierto]="confirmandoQuitar() === item.id" (abiertoChange)="!$event && confirmandoQuitar.set(null)"
+                      mensaje="¿Quitar este movimiento del cruce?" detalle="Se quita al guardar los cambios. Hasta entonces lo podés volver a incluir."
+                      textoConfirmar="Quitar" (confirmado)="alternarEliminado(item)">
+                      <button type="button" (click)="$event.stopPropagation(); pedirQuitar(item)" [disabled]="!item.id" appAyuda="Quitar movimiento"
+                        class="grid h-8 w-8 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-red-50 hover:text-red-700 disabled:opacity-40"
+                        [attr.aria-expanded]="confirmandoQuitar() === item.id" aria-label="Quitar movimiento">
+                        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
+                      </button>
+                    </app-popconfirm>
+                  }
                 </td>
               </tr>
 
@@ -789,29 +805,14 @@
   </details>
 
   <!-- Pie fijo -->
-  <div class="sticky bottom-0 z-30 -mx-10 -mb-10 mt-6 flex flex-wrap items-center gap-3 border-t border-line bg-white px-10 py-3 shadow-[0_-4px_12px_rgba(0,0,0,0.05)]">
-    <p class="mr-auto text-sm">
-      Total de discrepancias a justificar:
-      <strong class="tabular-nums">{{ r.partidas_a_revisar ?? 0 }} {{ r.partidas_a_revisar === 1 ? 'partida' : 'partidas' }}</strong>
-    </p>
-    <button
-      type="button"
-      (click)="store.exportar()"
-      [disabled]="!store.puedeExportar()"
-      class="rounded-lg border border-line bg-white px-4 py-2.5 font-semibold transition-colors hover:bg-canvas disabled:cursor-not-allowed disabled:opacity-50"
-    >
-      {{ store.exportando() ? 'Generando Excel…' : 'Exportar Excel' }}
-    </button>
-    <button
-      type="button"
-      (click)="abrirEnvio()"
-      [disabled]="!store.puedeExportar() || !sesion.puedePreparar()"
-      [title]="sesion.puedePreparar() ? '' : 'Tu sesión terminó: volvé a ingresar'"
-      class="rounded-lg bg-brand-700 px-4 py-2.5 font-semibold text-white shadow-sm transition-colors hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-50"
-    >
-      Generar Lote para Revisión
-    </button>
-  </div>
+  <app-pie-conciliacion
+    [discrepancias]="r.partidas_a_revisar ?? 0"
+    [puedeExportar]="store.puedeExportar()"
+    [exportando]="store.exportando()"
+    [puedePreparar]="sesion.puedePreparar()"
+    (exportar)="store.exportar()"
+    (generarLote)="abrirEnvio()"
+  />
 } @else {
   <!-- Sin resultado todavía -->
   <section class="flex min-h-96 flex-col items-center justify-center rounded-2xl border border-line bg-white px-6 text-center">

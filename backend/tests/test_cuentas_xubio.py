@@ -1,3 +1,5 @@
+import pytest
+
 from app.bots import conexiones
 from app.services.cuentas_xubio import elegir_cuenta, elegir_cuentas
 from app.services.importador_mayor import LecturaMayor
@@ -56,3 +58,36 @@ def test_en_cuenta_se_escribe_el_comienzo_del_nombre():
     assert terminos_de_busqueda("Ganancias", "Percepcion")[0] == "Percepción"
     nombres = ["Retención Ganancias Sufrida", "Retención IVA Sufrida", "Percepción de Ganancias Sufrida"]
     assert elegir_cuentas(nombres, "Ganancias", "RetencionPercepcion") == [nombres[0], nombres[2]]
+
+
+# Un plan de cuentas con los regímenes que no son Ganancias ni IVA.
+PLAN_OTROS = [
+    "1.1.4.10 - Percepciones Impuesto PAIS sufridas",
+    "1.1.4.11 - Retenciones Bienes Personales Acciones y Participaciones",
+    "1.1.4.12 - Retenciones ITI sufridas",
+    "1.1.4.13 - Retenciones sobre premios sufridas",
+    "1.1.4.14 - Retención Donaciones a recuperar",
+    "2.1.3.05 - Percepciones Impuesto PAIS a depositar",
+    "6.1.1.01 - Donaciones",  # gasto: no es una retención
+    "1.1.4.01 - Retenciones de Ganancias Sufridas",
+]
+
+
+@pytest.mark.parametrize(
+    "impuesto,tipo,esperada",
+    [
+        ("Impuesto PAIS", "Percepcion", PLAN_OTROS[0]),
+        ("Bienes Personales", "Retencion", PLAN_OTROS[1]),
+        ("Transferencia de Inmuebles", "Retencion", PLAN_OTROS[2]),
+        ("Premios", "Retencion", PLAN_OTROS[3]),
+        ("Donaciones", "Retencion", PLAN_OTROS[4]),
+        ("Ganancias", "Retencion", PLAN_OTROS[7]),
+    ],
+)
+def test_elige_la_cuenta_de_los_otros_impuestos(impuesto, tipo, esperada):
+    assert elegir_cuenta(PLAN_OTROS, impuesto, tipo) == esperada
+
+
+@pytest.mark.parametrize("impuesto,tipo", [("Impuesto PAIS", "Retencion"), ("Bienes Personales", "Percepcion")])
+def test_sin_cuenta_del_tipo_no_elige_otra(impuesto, tipo):
+    assert elegir_cuenta(PLAN_OTROS, impuesto, tipo) is None

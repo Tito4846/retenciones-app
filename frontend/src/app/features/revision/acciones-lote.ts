@@ -1,9 +1,7 @@
-import { Component, computed, inject, input, linkedSignal, model, output } from '@angular/core';
+import { Component, computed, inject, input, linkedSignal, output } from '@angular/core';
 import { DetalleLote } from '../../core/models/lote.models';
 import { LotesStore } from '../../core/services/lotes.store';
 import { Permisos } from './revision.util';
-
-const SIN_AUTOAPROBACION = 'No podés aprobar un lote que vos mismo preparaste';
 
 /** Pie fijo: los botones que mueven el lote, según quién mira y en qué estado está. */
 @Component({
@@ -18,7 +16,6 @@ const SIN_AUTOAPROBACION = 'No podés aprobar un lote que vos mismo preparaste';
           <p class="text-sm text-emerald-900">
             Vas a aprobar la versión {{ lote.version_vigente }} de <strong>{{ lote.empresa }}</strong>.
             Queda cerrada: no se va a poder editar ni borrar nada, y su Excel queda como el definitivo.
-            @if (evidencia().length; as n) { Se {{ n === 1 ? 'adjunta 1 comprobante' : 'adjuntan ' + n + ' comprobantes' }} al cierre. }
           </p>
           @if (aMirar().length) {
             <p class="mt-1 text-sm font-semibold text-amber-800">Se aprueba con esto sin resolver: {{ aMirar().join(' · ') }}. Queda registrado.</p>
@@ -48,11 +45,6 @@ const SIN_AUTOAPROBACION = 'No podés aprobar un lote que vos mismo preparaste';
       </div>
     }
 
-    @if (p.editar && evidencia().length) {
-      <p class="mb-2 text-xs text-muted">
-        {{ evidencia().length === 1 ? '1 comprobante espera' : evidencia().length + ' comprobantes esperan' }} la confirmación: se {{ evidencia().length === 1 ? 'adjunta' : 'adjuntan' }} al {{ p.revisar ? 'aprobar' : 'enviar' }}.
-      </p>
-    }
     @if (p.editar && !p.revisar) {
       <input type="text" [value]="nota()" (input)="nota.set($any($event.target).value)" aria-label="Nota para quien revisa"
         placeholder="Nota para quien revisa (opcional)"
@@ -67,10 +59,12 @@ const SIN_AUTOAPROBACION = 'No podés aprobar un lote que vos mismo preparaste';
         <button type="button" (click)="confirmar.set('anular')" class="px-2 text-sm font-semibold text-muted hover:text-red-700">Anular</button>
       }
       @if (p.editar && !p.revisar) {
+        <!-- Lo principal para quien prepara: el botón más grande y con más peso de la barra -->
         <span [title]="trabasEnviar().join('\\n')">
           <button type="button" (click)="enviar()" [disabled]="store.ocupado() || trabasEnviar().length > 0"
-            class="rounded-lg bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-50">
+            class="flex items-center gap-2 rounded-lg bg-brand-700 px-5 py-2.5 text-sm font-bold text-white shadow-md shadow-brand-700/25 ring-2 ring-brand-700/20 ring-offset-2 transition hover:bg-brand-800 hover:shadow-lg focus-visible:ring-brand-400 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none">
             {{ lote.estado === 'rechazado' ? 'Reenviar a Revisión' : 'Enviar a Revisión' }}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6" /></svg>
           </button>
         </span>
       }
@@ -87,9 +81,22 @@ const SIN_AUTOAPROBACION = 'No podés aprobar un lote que vos mismo preparaste';
           class="rounded-lg border border-red-300 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50">Devolver para Corregir</button>
       }
       @if (p.revisar || p.autor) {
-        <span [title]="p.autor ? sinAutoaprobacion : trabasAprobar().join('\\n')">
-          <button type="button" (click)="confirmar.set('aprobar')" [disabled]="store.ocupado() || p.autor || trabasAprobar().length > 0"
-            class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50">Aprobar y Cerrar Lote</button>
+        @let bloqueado = trabasAprobar().length > 0;
+        <!--
+          Poka-yoke: deshabilitado con diferencia neta, excepciones sin completar o lote propio.
+          Un botón disabled no recibe foco ni hover: el envoltorio hace de disparador del tooltip.
+        -->
+        <span class="group relative inline-flex" [attr.tabindex]="bloqueado ? 0 : null" [attr.aria-describedby]="bloqueado ? 'por-que-no-aprobar' : null">
+          <button type="button" (click)="confirmar.set('aprobar')" [disabled]="store.ocupado() || bloqueado"
+            class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:pointer-events-none disabled:bg-zinc-300 disabled:text-zinc-600">Aprobar y Cerrar Lote</button>
+          @if (bloqueado) {
+            <span id="por-que-no-aprobar" role="tooltip"
+              class="pointer-events-none invisible absolute right-0 bottom-full z-40 mb-2 w-72 rounded-lg bg-ink px-3 py-2 text-left text-xs text-white opacity-0 shadow-lg transition group-hover:visible group-hover:opacity-100 group-focus:visible group-focus:opacity-100">
+              <span class="block font-semibold">Todavía no se puede cerrar el lote:</span>
+              @for (m of trabasAprobar(); track m) { <span class="mt-1 block">• {{ m }}</span> }
+              <span class="absolute top-full right-6 border-4 border-transparent border-t-ink" aria-hidden="true"></span>
+            </span>
+          }
         </span>
       }
     </div>
@@ -97,7 +104,6 @@ const SIN_AUTOAPROBACION = 'No podés aprobar un lote que vos mismo preparaste';
 })
 export class AccionesLote {
   protected readonly store = inject(LotesStore);
-  protected readonly sinAutoaprobacion = SIN_AUTOAPROBACION;
 
   readonly detalle = input.required<DetalleLote>();
   readonly permisos = input.required<Permisos>();
@@ -105,8 +111,6 @@ export class AccionesLote {
   readonly trabasAprobar = input.required<string[]>();
   /** Lo que quedó sin resolver: se informa, no frena. */
   readonly pendiente = input<string[]>([]);
-  /** Se manda con la confirmación y se vacía solo si salió bien. */
-  readonly evidencia = model<File[]>([]);
   readonly eliminado = output<void>();
 
   private readonly loteId = computed(() => this.detalle().lote.id);
@@ -146,11 +150,7 @@ export class AccionesLote {
 
   protected enviar(): void {
     const { id, version_vigente } = this.detalle().lote;
-    this.store.enviar(id, version_vigente, this.nota(), this.evidencia()).subscribe((ok) => {
-      if (!ok) return;
-      this.nota.set('');
-      this.evidencia.set([]);
-    });
+    this.store.enviar(id, version_vigente, this.nota()).subscribe((ok) => ok && this.nota.set(''));
   }
 
   protected confirmarAccion(): void {
@@ -161,10 +161,7 @@ export class AccionesLote {
     if (tipo === 'anular') this.store.anular(id, this.motivo()).subscribe(fin);
     if (tipo === 'eliminar') this.store.eliminar(id).subscribe((ok) => ok && this.eliminado.emit());
     if (tipo === 'aprobar') {
-      this.store.aprobar(id, version_vigente, this.evidencia()).subscribe((ok) => {
-        if (ok) this.evidencia.set([]);
-        fin(ok);
-      });
+      this.store.aprobar(id, version_vigente).subscribe(fin);
     }
   }
 }

@@ -16,11 +16,6 @@ services:
       mountPath: /var/data
       sizeGB: 1
     envVars:
-      # Expuesto a internet: limitar intentos de ingreso (ver README).
-      - key: LIMITAR_INGRESO_IP
-        value: "true"
-      - key: INTENTOS_MAX
-        value: "5"
       # Se completan a mano en el panel de Render (no quedan en git).
       - key: EMPRESA
         sync: false

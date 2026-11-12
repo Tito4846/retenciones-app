@@ -497,3 +497,36 @@ def test_automatico_valida_fechas():
         json={"cuit_retenido": "30710809883", "desde": "2026-11-01", "hasta": "2026-10-31"},
     )
     assert respuesta.status_code == 422
+
+
+def test_bot_arca_registra_eventos_para_el_mini_log(tmp_path):
+    lanzar, pestana = _chrome_falso([])
+    bot = NavegadorArca(lanzar=lanzar, directorio=tmp_path)
+    assert bot.estado()["eventos"] == [] and bot.estado()["ultima_actividad"] is None
+
+    bot.conectar("30712345678", "clave-secreta")
+    assert _esperar(lambda: bot.estado()["estado"] == CONECTADO)
+    pestana.is_closed.return_value = True
+    assert _esperar(lambda: bot.estado()["estado"] == DESCONECTADO)
+
+    estado = bot.estado()
+    eventos = estado["eventos"]
+    # Más nuevo primero: la ventana cerrada es un error; antes, la conexión fue un éxito.
+    assert eventos[0]["tipo"] == "error" and "Se cerró la ventana" in eventos[0]["mensaje"]
+    assert any(e["tipo"] == "ok" for e in eventos)
+    assert estado["ultima_actividad"] is not None
+    assert len(eventos) == 5  # solo viajan los últimos 5
+    assert "clave-secreta" not in str(estado)
+
+
+def test_bitacora_no_repite_el_mismo_mensaje_seguido():
+    from app.bots.bitacora import Bitacora, tipo_de
+
+    b = Bitacora()
+    for _ in range(3):
+        b.registrar("Conectado a ARCA.", "ok")
+    b.registrar("No se pudo consultar Mis Retenciones: timeout", tipo_de("conectado", "No se pudo consultar Mis Retenciones: timeout"))
+    eventos = b.a_dict()["eventos"]
+    assert [e["tipo"] for e in eventos] == ["error", "ok"]
+    assert tipo_de("desconectado", None) == "info"
+    assert tipo_de("esperando_ingreso", "Resolvé el captcha") == "info"

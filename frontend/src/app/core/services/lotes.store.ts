@@ -4,6 +4,7 @@ import { Router } from '@angular/router';
 import { Observable, catchError, finalize, map, of, tap } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import {
+  CambioPartida,
   Catalogo,
   DetalleLote,
   Diff,
@@ -158,6 +159,19 @@ export class LotesStore {
     datos.append('archivo', archivo);
     datos.append('version_base', String(versionBase));
     return this.accion(this.http.post<DetalleLote>(`${this.api}/${loteId}/versiones`, datos), this.errorExcel);
+  }
+
+  /** Corrección en pantalla de una partida. `importe_ajustado: null` borra el ajuste. */
+  actualizarPartida(loteId: string, clave: string, version: number, cambios: CambioPartida): Observable<boolean> {
+    return this.accion(this.http.patch<DetalleLote>(`${this.api}/${loteId}/partidas/${encodeURIComponent(clave)}`, { version, ...cambios }));
+  }
+
+  /** Comprobante pegado a una partida: queda guardado en el acto. */
+  adjuntarAPartida(loteId: string, clave: string, archivo: File): Observable<boolean> {
+    const datos = new FormData();
+    datos.append('archivo', archivo);
+    datos.append('clave_partida', clave);
+    return this.accion(this.http.post<DetalleLote>(`${this.api}/${loteId}/adjuntos`, datos));
   }
 
   retirarAdjunto(loteId: string, adjuntoId: string): Observable<boolean> {

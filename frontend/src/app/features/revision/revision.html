@@ -5,9 +5,10 @@
 
   @if (d(); as det) {
     @let p = permisos();
-    <section class="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-line bg-canvas">
-      <!-- Encabezado fijo: de quién es el lote y cómo da el cruce -->
-      <header class="space-y-3 border-b border-line bg-white p-3">
+    <!-- En pantallas chicas no recorta: los totales se pegan arriba de la ventana -->
+    <section class="flex min-h-0 min-w-0 flex-col rounded-2xl border border-line bg-canvas xl:overflow-hidden">
+      <!-- De quién es el lote y en qué paso está -->
+      <header class="space-y-3 rounded-t-2xl border-b border-line bg-white p-3">
         <div class="flex flex-wrap items-center gap-2">
           <h2 class="min-w-0 truncate text-lg font-semibold" [title]="det.lote.empresa">{{ det.lote.empresa }}</h2>
           <span class="rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1" [class]="estados[det.lote.estado].clase">{{ estados[det.lote.estado].titulo }}</span>
@@ -17,7 +18,6 @@
           </p>
         </div>
         <app-seguimiento-lote [detalle]="det" />
-        <app-marcador-cruce [sistema]="totales().sistema" [declarado]="totales().declarado" />
       </header>
 
       @if (store.error(); as e) {
@@ -39,7 +39,15 @@
         </div>
       }
 
-      <div class="min-h-0 flex-1 space-y-4 overflow-y-auto p-3">
+      <div class="min-h-0 flex-1 space-y-4 p-3 xl:overflow-y-auto">
+        <!--
+          Totales siempre a la vista: sticky dentro del panel (en xl) o de la ventana.
+          Asoma 4rem (h-14 + pb-2; el pt-3 queda tapado): la cabecera de la tabla va en top-16.
+        -->
+        <div class="sticky -top-3 z-20 -mx-3 -mt-3 border-b border-line bg-canvas/95 px-3 pt-3 pb-2 backdrop-blur">
+          <app-marcador-cruce class="h-14" [sistema]="totales().sistema" [declarado]="totales().declarado" />
+        </div>
+
         @if (p.editar && det.lote.estado === 'rechazado' && ultimoRechazo(); as r) {
           <div class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
             <p class="font-semibold">{{ r.usuario_nombre }} te lo devolvió el {{ r.fecha_utc | date: 'dd/MM HH:mm' }}.</p>
@@ -48,7 +56,7 @@
         }
 
         @if (det.partidas.length) {
-          <app-gestor-lote [detalle]="det" [editar]="p.editar" [revisar]="p.revisar" [(evidencia)]="evidencia" />
+          <app-gestor-lote [detalle]="det" [editar]="p.editar" [revisar]="p.revisar" />
         } @else {
           <div class="rounded-xl border border-line bg-white p-4 text-sm">
             <p class="font-semibold">Este lote viene de la bandeja anterior y no tiene partidas.</p>
@@ -68,7 +76,7 @@
         </details>
       </div>
 
-      <app-acciones-lote [detalle]="det" [permisos]="p" [trabasEnviar]="trabasEnviar()" [trabasAprobar]="trabasAprobar()" [pendiente]="pendiente()" [(evidencia)]="evidencia" (eliminado)="alEliminar()" />
+      <app-acciones-lote [detalle]="det" [permisos]="p" [trabasEnviar]="trabasEnviar()" [trabasAprobar]="trabasAprobar()" [pendiente]="pendiente()" (eliminado)="alEliminar()" />
     </section>
   } @else {
     <section class="flex items-center justify-center rounded-2xl border border-dashed border-line p-10 text-center text-muted">

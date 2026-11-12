@@ -1,12 +1,18 @@
-import { DatePipe } from '@angular/common';
-import { Component, DestroyRef, afterNextRender, inject, signal } from '@angular/core';
-import { RouterLink } from '@angular/router';
+import { DatePipe, NgTemplateOutlet } from '@angular/common';
+import { Component, DestroyRef, afterNextRender, computed, inject, signal } from '@angular/core';
 import { CuitPipe } from '../../core/cuit.pipe';
 import { ConexionesStore } from '../../core/services/conexiones.store';
+import { BotConnectionCard } from './bot-connection-card';
+import { etiquetaArca, saludArca, saludXubio } from './conexion-bot.reglas';
+import { CampoClave } from './campo-clave';
 
+/**
+ * Contenedor de «Conexiones»: lee el store, decide qué ofrece cada tarjeta y maneja
+ * los formularios. Las tarjetas (BotConnectionCard) solo muestran.
+ */
 @Component({
   selector: 'app-conexiones',
-  imports: [CuitPipe, DatePipe, RouterLink],
+  imports: [BotConnectionCard, CampoClave, CuitPipe, DatePipe, NgTemplateOutlet],
   templateUrl: './conexiones.html',
 })
 export class Conexiones {
@@ -14,6 +20,14 @@ export class Conexiones {
 
   /** Lo que falta completar en el formulario de ARCA (se muestra al enviar). */
   protected readonly faltaArca = signal<string | null>(null);
+
+  protected readonly saludArca = computed(() => saludArca(this.store.arca()));
+  protected readonly saludXubio = computed(() => saludXubio(this.store.xubio()));
+  protected readonly etiquetaArca = computed(() => etiquetaArca(this.store.arca()));
+
+  /** Con la ventana abierta (conectado o esperando a la persona) hay algo para mostrar o cortar. */
+  protected readonly ventanaArca = computed(() => this.store.arca()?.estado !== 'desconectado' && !!this.store.arca());
+  protected readonly ventanaXubio = computed(() => this.store.xubio()?.estado !== 'desconectado' && !!this.store.xubio());
 
   constructor() {
     const destroyRef = inject(DestroyRef);

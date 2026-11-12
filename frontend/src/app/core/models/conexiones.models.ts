@@ -43,7 +43,23 @@ export interface ConsultaArca {
   hasta: string;
 }
 
-export interface ConexionArca {
+/** Un evento del mini-log del bot. Los mensajes son los mismos de la pantalla: nunca llevan claves. */
+export interface EventoBot {
+  /** ISO, hora local del servidor. */
+  cuando: string;
+  tipo: 'ok' | 'error' | 'info';
+  mensaje: string;
+}
+
+/** Lo que comparten los dos bots para el mini-log y la «Última actividad». */
+export interface ActividadBot {
+  /** Último cambio o última vez que el bot comprobó que la sesión sigue abierta. */
+  ultima_actividad?: string | null;
+  /** Los últimos eventos, el más nuevo primero. */
+  eventos?: EventoBot[];
+}
+
+export interface ConexionArca extends ActividadBot {
   estado: EstadoArca;
   mensaje: string | null;
   cuit: string | null;
@@ -54,7 +70,7 @@ export interface ConexionArca {
   renovando?: boolean;
 }
 
-export interface ConexionXubio {
+export interface ConexionXubio extends ActividadBot {
   estado: EstadoXubio;
   mensaje: string | null;
   usuario: string | null;
