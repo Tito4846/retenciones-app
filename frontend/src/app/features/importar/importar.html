@@ -4,28 +4,8 @@
       <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /><path d="M12 17v-6" /><path d="m9 14 3-3 3 3" />
     </svg>
   </div>
-  <div>
-    <h1 class="text-2xl font-semibold">Importar retenciones</h1>
-    <p class="mt-1 text-lg text-muted">
-      Una empresa, un impuesto y un período: lo que informa ARCA contra lo registrado en Xubio. Los bots bajan los dos Excel solos, o subilos a mano.
-    </p>
-  </div>
+  <h1 class="self-center text-2xl font-semibold">Importar retenciones</h1>
 </header>
-
-<!-- Los 4 pasos: guardados por defecto, quien ya usa la pantalla no los necesita -->
-<app-plegable class="mb-4" titulo="Cómo funciona la importación">
-  <ol class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-    @for (paso of pasos; track paso.titulo; let i = $index) {
-      <li class="flex gap-3 rounded-xl border border-line bg-white p-4">
-        <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-50 text-sm font-bold text-brand-700">{{ i + 1 }}</span>
-        <div>
-          <p class="font-semibold">{{ paso.titulo }}</p>
-          <p class="mt-0.5 text-sm text-muted">{{ paso.ayuda }}</p>
-        </div>
-      </li>
-    }
-  </ol>
-</app-plegable>
 
 <!-- Automático: los bots traen todo -->
 <app-consulta-arca />

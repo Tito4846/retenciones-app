@@ -12,28 +12,24 @@ import { hace, iniciales, quienArmo } from './revision.util';
   template: `
     @let det = detalle();
     @if (vigente(); as v) {
-      <div class="flex items-start gap-3">
-        <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-700 text-xs font-bold text-white" aria-hidden="true">{{ iniciales(v.autor_nombre) }}</span>
-        <div class="min-w-0 flex-1">
-          <p class="font-semibold">{{ titulo() }}</p>
-          <p class="text-xs text-muted">
-            Versión {{ v.numero }} · <span [title]="v.creado_utc | date: 'dd/MM/yyyy HH:mm'">{{ hace(v.creado_utc) }}</span>
-            @if (cambiadas(); as n) { · {{ n === 1 ? '1 partida modificada' : n + ' partidas modificadas' }} }
-          </p>
-          <p class="truncate text-xs text-muted" [title]="v.nombre_archivo">{{ v.nombre_archivo }}</p>
-        </div>
-        <ng-content />
+      <div class="flex min-w-0 items-center gap-2 text-xs" [title]="v.nombre_archivo">
+        <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand-700 text-[9px] font-bold text-white" aria-hidden="true">{{ iniciales(v.autor_nombre) }}</span>
+        <p class="min-w-0 truncate">
+          <span class="font-semibold">{{ titulo() }}</span>
+          <span class="text-muted"> · v{{ v.numero }} · <span [title]="v.creado_utc | date: 'dd/MM/yyyy HH:mm'">{{ hace(v.creado_utc) }}</span>
+            @if (cambiadas(); as n) { · {{ n === 1 ? '1 partida modificada' : n + ' partidas modificadas' }} }</span>
+        </p>
       </div>
     }
 
     @if (nota(); as n) {
-      <blockquote class="mt-2 rounded-lg bg-brand-50 px-3 py-2 text-sm">
+      <blockquote class="mt-1.5 rounded-lg bg-brand-50 px-3 py-1.5 text-sm">
         <span class="font-semibold">Nota de {{ n.usuario_nombre }}:</span> {{ n.motivo }}
       </blockquote>
     }
 
     @if (det.adjuntos.length) {
-      <div class="mt-2">
+      <div class="mt-1.5">
         <p class="text-xs font-semibold text-muted">{{ det.adjuntos.length === 1 ? '1 comprobante' : det.adjuntos.length + ' comprobantes' }}</p>
         <ul class="mt-1 flex flex-wrap gap-1.5">
           @for (a of det.adjuntos; track a.id) {
@@ -50,7 +46,7 @@ import { hace, iniciales, quienArmo } from './revision.util';
     }
 
     @if (avisos().length) {
-      <ul class="mt-2 max-h-24 list-disc space-y-0.5 overflow-y-auto pl-4 text-xs text-amber-800">
+      <ul class="mt-1.5 max-h-24 list-disc space-y-0.5 overflow-y-auto pl-4 text-xs text-amber-800">
         @for (a of avisos(); track $index) { <li>{{ a.mensaje }}</li> }
       </ul>
     }

@@ -46,7 +46,6 @@ const ACCIONES: Record<string, string> = {
           </li>
         }
       </ol>
-      <p class="mt-4 text-xs text-muted">Registro que no se puede editar ni borrar. Pasá el mouse por la hora para ver la IP y la hora UTC.</p>
     } @else {
       <p class="py-6 text-center text-sm text-muted">Cargando…</p>
     }

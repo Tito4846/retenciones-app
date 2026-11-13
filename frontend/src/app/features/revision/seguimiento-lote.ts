@@ -12,16 +12,16 @@ interface Paso {
 }
 
 const MARCA: Record<EstadoPaso, string> = {
-  hecho: 'bg-emerald-600 text-white',
-  actual: 'bg-brand-700 text-white ring-4 ring-brand-100',
-  pendiente: 'border-2 border-slate-300 bg-white text-slate-500',
-  devuelto: 'bg-red-600 text-white ring-4 ring-red-100',
+  hecho: 'bg-emerald-500',
+  actual: 'bg-brand-600 ring-2 ring-brand-100',
+  pendiente: 'border border-slate-300 bg-white',
+  devuelto: 'bg-red-500 ring-2 ring-red-100',
 };
 
 const TITULO: Record<EstadoPaso, string> = {
   hecho: 'text-emerald-800',
   actual: 'text-brand-800',
-  pendiente: 'text-slate-500',
+  pendiente: 'text-slate-400',
   devuelto: 'text-red-700',
 };
 
@@ -38,31 +38,15 @@ const ESTADO_LEIBLE: Record<EstadoPaso, string> = {
   imports: [DatePipe],
   host: { class: 'block' },
   template: `
-    <ol class="grid grid-cols-4" aria-label="Recorrido del lote">
+    <!-- Una sola línea: quién hizo cada paso; la fecha va en el tooltip -->
+    <ol class="flex min-w-0 items-center gap-1.5 overflow-hidden text-xs whitespace-nowrap" aria-label="Recorrido del lote">
       @for (p of pasos(); track p.titulo; let ultimo = $last) {
-        <li class="relative min-w-0 pr-2" [attr.aria-current]="p.estado === 'actual' ? 'step' : null">
-          <!-- La línea hasta el paso siguiente: verde si este ya se hizo -->
-          @if (!ultimo) {
-            <span class="absolute top-3 left-7 right-1 h-0.5 rounded-full" [class]="p.estado === 'hecho' ? 'bg-emerald-500' : 'bg-slate-200'" aria-hidden="true"></span>
-          }
-          <span class="relative flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold" [class]="marca[p.estado]" aria-hidden="true">
-            @switch (p.estado) {
-              @case ('hecho') {
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5"><path d="m5 12 5 5L20 7" /></svg>
-              }
-              @case ('devuelto') { ! }
-              @default { {{ $index + 1 }} }
-            }
-          </span>
-          <p class="mt-1.5 truncate text-xs font-bold tracking-wider uppercase" [class]="titulo[p.estado]">
-            {{ p.titulo }}<span class="sr-only"> ({{ leible[p.estado] }})</span>
-          </p>
-          <p class="truncate text-sm" [class]="p.quien ? 'font-semibold text-ink' : 'text-slate-500'" [title]="p.quien">{{ p.quien || '—' }}</p>
-          @if (p.fecha) {
-            <p class="truncate text-xs font-medium text-slate-600 tabular-nums">
-              <time [attr.datetime]="p.fecha" [title]="p.fecha | date: 'dd/MM/yyyy HH:mm:ss'">{{ p.fecha | date: 'dd/MM/yy · HH:mm' }}</time>
-            </p>
-          }
+        <li class="flex min-w-0 items-center gap-1.5" [attr.aria-current]="p.estado === 'actual' ? 'step' : null"
+          [title]="p.fecha ? p.titulo + ' · ' + (p.fecha | date: 'dd/MM/yyyy HH:mm') : p.titulo">
+          <span class="h-2 w-2 shrink-0 rounded-full" [class]="marca[p.estado]" aria-hidden="true"></span>
+          <span class="font-semibold tracking-wide uppercase" [class]="titulo[p.estado]">{{ p.titulo }}<span class="sr-only"> ({{ leible[p.estado] }})</span></span>
+          <span class="min-w-0 truncate" [class]="p.quien ? 'text-ink' : 'text-slate-400'">{{ p.quien || '—' }}</span>
+          @if (!ultimo) { <span class="text-slate-300" aria-hidden="true">›</span> }
         </li>
       }
     </ol>

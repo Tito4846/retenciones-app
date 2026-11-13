@@ -1,6 +1,6 @@
 import { DatePipe } from '@angular/common';
 import { Component, computed, inject, input, linkedSignal, signal } from '@angular/core';
-import { CuitPipe } from '../../core/cuit.pipe';
+import { CuitPipe, formatearCuit } from '../../core/cuit.pipe';
 import { Adjunto, CambioPartida, Partida } from '../../core/models/lote.models';
 import { LotesStore } from '../../core/services/lotes.store';
 import { diferenciaFila, ESTADO_FILA, EstadoFila, leerImporte } from './revision.reglas';
@@ -45,51 +45,54 @@ type Panel = 'ajustar' | 'descartar' | 'detalle' | null;
   template: `
     @let p = partida();
     @let e = estados[estado()];
-    <tr class="align-top" [class.opacity-60]="estado() === 'descartada'">
-      <td class="px-2 pt-2 pb-1.5">
-        <p class="font-semibold wrap-break-word">{{ p.razon_social || 'Sin razón social' }}</p>
-        @if (p.cuit) { <p class="truncate text-muted tabular-nums">{{ p.cuit | cuit }}</p> }
-        <span class="mt-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset" [class]="e.clase">
-          <span class="h-1.5 w-1.5 rounded-full" [class]="e.punto" aria-hidden="true"></span>{{ e.texto }}
-        </span>
+    <tr class="align-middle whitespace-nowrap [&>td]:py-1.5" [class.opacity-60]="estado() === 'descartada'">
+      <td class="px-2">
+        <div class="flex min-w-0 items-center gap-1.5">
+          <span class="h-2 w-2 shrink-0 rounded-full" [class]="e.punto" [title]="e.texto" aria-hidden="true"></span>
+          <span class="sr-only">{{ e.texto }}:</span>
+          <span class="min-w-0 truncate font-semibold" [title]="p.razon_social && p.cuit ? nombre() + ' · CUIT ' + (p.cuit | cuit) : nombre()">{{ nombre() }}</span>
+          @if (p.razon_social && p.cuit) { <span class="hidden shrink-0 text-xs text-muted tabular-nums 2xl:inline">{{ p.cuit | cuit }}</span> }
+        </div>
       </td>
-      <td class="px-2 pt-2 pb-1.5 wrap-anywhere">{{ p.certificado || p.documento_erp || '—' }}</td>
-      <td class="px-2 pt-2 pb-1.5 text-right whitespace-nowrap tabular-nums">
-        {{ pesos(p.importe_ajustado ?? p.importe_erp) }}
+      <td class="truncate px-2" [title]="p.certificado || p.documento_erp || ''">{{ p.certificado || p.documento_erp || '—' }}</td>
+      <td class="truncate px-1.5 text-right tabular-nums">
         @if (p.importe_ajustado !== null) {
-          <p class="text-xs text-muted" title="Lo que decía el Mayor antes del ajuste">{{ p.importe_erp === null ? 'ajustado' : 'antes ' + pesos(p.importe_erp) }}</p>
+          <span class="underline decoration-muted decoration-dotted underline-offset-2"
+            [title]="p.importe_erp === null ? 'Ajustado (no estaba en el Mayor)' : 'Ajustado · antes ' + pesos(p.importe_erp)">{{ pesos(p.importe_ajustado) }}</span>
+        } @else {
+          {{ pesos(p.importe_erp) }}
         }
       </td>
-      <td class="px-2 pt-2 pb-1.5 text-right whitespace-nowrap tabular-nums">{{ pesos(p.importe_fisco) }}</td>
-      <td class="px-2 pt-2 pb-1.5 text-right font-semibold whitespace-nowrap tabular-nums"
+      <td class="truncate px-1.5 text-right tabular-nums">{{ pesos(p.importe_fisco) }}</td>
+      <td class="truncate px-1.5 text-right font-semibold tabular-nums"
         [class.text-red-700]="diferencia() !== 0" [class.text-emerald-700]="diferencia() === 0">{{ pesos(diferencia() / 100) }}</td>
-      <td class="px-2 pt-2 pb-1.5">
+      <td class="px-2">
         <div class="flex flex-wrap gap-1">
           @for (m of motivos(); track m.texto) {
-            <span class="rounded px-1.5 py-0.5 text-xs font-medium ring-1 ring-inset" [class]="m.clase" [title]="m.ayuda">{{ m.texto }}</span>
+            <span class="rounded px-1.5 py-0.5 text-[11px] leading-none font-medium ring-1 ring-inset" [class]="m.clase" [title]="m.ayuda || m.texto">{{ m.texto }}</span>
           }
         </div>
       </td>
-      <td class="px-1 pt-1.5 pb-1.5">
+      <td class="px-1">
         <div class="flex justify-end gap-0.5">
           @if (editar()) {
             <button type="button" (click)="abrir('ajustar')" [disabled]="store.ocupado() || estado() === 'descartada'" title="Ajustar" aria-label="Ajustar"
               [attr.aria-expanded]="panel() === 'ajustar'" [class]="boton('ajustar')">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
             </button>
             @if (estado() === 'descartada') {
               <button type="button" (click)="restaurar()" [disabled]="store.ocupado()" title="Volver a incluir en el cruce" aria-label="Volver a incluir" [class]="boton(null)">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5" /></svg>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5" /></svg>
               </button>
             } @else {
               <button type="button" (click)="abrir('descartar')" [disabled]="store.ocupado()" title="Descartar del cruce" aria-label="Descartar"
                 [attr.aria-expanded]="panel() === 'descartar'" [class]="boton('descartar')">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
               </button>
             }
           }
           <button type="button" (click)="abrir('detalle')" title="Ver detalle" aria-label="Ver detalle" [attr.aria-expanded]="panel() === 'detalle'" [class]="boton('detalle')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" /><circle cx="12" cy="12" r="3" /></svg>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" /><circle cx="12" cy="12" r="3" /></svg>
             @if (adjuntos().length) {
               <span class="absolute -top-1 -right-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-brand-700 px-0.5 text-[9px] font-bold text-white tabular-nums">{{ adjuntos().length }}</span>
             }
@@ -98,20 +101,20 @@ type Panel = 'ajustar' | 'descartar' | 'detalle' | null;
       </td>
     </tr>
 
+    <!-- Debajo, solo si hay algo que decir: la justificación (una línea) o el panel abierto -->
+    @if (encima() || subiendo() || rechazo() || panel() || nota()) {
     <tr>
-      <td colspan="7" class="px-2 pb-2 text-xs">
+      <td colspan="7" class="px-2 pb-1.5 text-xs">
         @if (encima()) {
-          <p class="rounded-md bg-white/70 py-1.5 text-center font-semibold text-brand-700">Soltá para adjuntarlo a {{ p.razon_social || 'esta partida' }}</p>
+          <p class="rounded-md bg-white/70 py-1 text-center font-semibold text-brand-700">Soltá para adjuntarlo a {{ nombre() }}</p>
         } @else if (subiendo()) {
           <p class="text-brand-700">Adjuntando…</p>
-        } @else if (p.justificacion || p.comentario || p.editado_por) {
-          <p>
+        } @else if (nota()) {
+          <p class="truncate pl-3.5" [title]="(justificacion() ? justificacion() + ' · ' : '') + p.comentario">
             @if (justificacion()) { <span class="font-semibold">{{ justificacion() }}</span> }
             @if (p.comentario) { <span>{{ justificacion() ? ' · ' : '' }}{{ p.comentario }}</span> }
             @if (p.editado_por) { <span class="text-muted"> — {{ p.editado_por }}</span> }
           </p>
-        } @else if (editar()) {
-          <p class="text-muted">Sin justificar · soltá acá el comprobante de esta partida</p>
         }
         @if (rechazo(); as r) { <p class="mt-1 font-semibold text-red-700" role="alert">{{ r }}</p> }
 
@@ -204,6 +207,7 @@ type Panel = 'ajustar' | 'descartar' | 'detalle' | null;
         }
       </td>
     </tr>
+    }
   `,
 })
 export class FilaPartida {
@@ -228,6 +232,15 @@ export class FilaPartida {
   protected readonly rechazo = signal<string | null>(null);
 
   protected readonly diferencia = computed(() => diferenciaFila(this.partida()));
+  /** La razón social, o la CUIT si el agente no trae nombre. */
+  protected readonly nombre = computed(() => {
+    const p = this.partida();
+    return p.razon_social?.trim() || formatearCuit(p.cuit) || 'Sin CUIT';
+  });
+  protected readonly nota = computed(() => {
+    const p = this.partida();
+    return !!(p.justificacion || p.comentario || p.editado_por);
+  });
   protected readonly justificaciones = computed(() => Object.entries(this.store.catalogo()?.justificaciones ?? {}));
   protected readonly justificacion = computed(() => {
     const j = this.partida().justificacion;
@@ -248,7 +261,7 @@ export class FilaPartida {
   protected boton(panel: Panel): string {
     const activo = panel !== null && this.panel() === panel;
     return (
-      'relative flex h-7 w-7 items-center justify-center rounded-md border transition-colors disabled:cursor-not-allowed disabled:opacity-40 ' +
+      'relative flex h-6 w-6 items-center justify-center rounded-md border transition-colors disabled:cursor-not-allowed disabled:opacity-40 ' +
       (activo ? 'border-brand-700 bg-brand-700 text-white' : 'border-line bg-white text-ink hover:border-brand-300 hover:text-brand-700')
     );
   }

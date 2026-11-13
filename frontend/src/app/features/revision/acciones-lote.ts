@@ -133,9 +133,9 @@ export class AccionesLote {
     const p = this.permisos();
     if (this.trabas().length) return `Para seguir: ${this.trabas().join(' · ')}`;
     const mirar = this.aMirar().join(' · ');
-    if (p.revisar) return mirar ? `Para evaluar: ${mirar}. Decidís vos si lo aprobás.` : 'Todo controlado: lo podés aprobar.';
-    if (p.editar) return mirar ? `Queda: ${mirar}. Lo podés enviar igual.` : 'Todo completo: ya lo podés enviar.';
-    if (p.tomar) return `Lo preparó ${lote.maker_nombre}. Al tomarlo queda a tu nombre.`;
+    if (p.revisar) return mirar ? `Para evaluar: ${mirar}.` : 'Todo controlado.';
+    if (p.editar) return mirar ? `Queda: ${mirar}.` : 'Todo completo.';
+    if (p.tomar) return `Lo preparó ${lote.maker_nombre}.`;
     if (p.reasignar) return `Lo está revisando ${lote.checker_nombre}.`;
     switch (lote.estado) {
       case 'borrador': return `${lote.maker_nombre} lo está preparando.`;
@@ -143,8 +143,8 @@ export class AccionesLote {
       case 'pendiente': return 'Esperando que lo tome un supervisor.';
       case 'en_revision': return `Lo está revisando ${lote.checker_nombre}.`;
       case 'aprobado':
-        return `Aprobado${lote.checker_nombre ? ' por ' + lote.checker_nombre : ''}. Su Excel es el definitivo.`;
-      default: return 'Anulado. Queda solo como registro.';
+        return `Aprobado${lote.checker_nombre ? ' por ' + lote.checker_nombre : ''}.`;
+      default: return 'Anulado.';
     }
   });
 

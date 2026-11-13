@@ -6,12 +6,13 @@ import { LotesStore } from '../../core/services/lotes.store';
 import { SesionService } from '../../core/services/sesion.service';
 import { AccionesLote } from './acciones-lote';
 import { BandejaLotes } from './bandeja-lotes';
+import { ExcelLote } from './excel-lote';
 import { GestorLote } from './gestor-lote';
 import { HistorialLote } from './historial-lote';
 import { MarcadorCruce } from './marcador-cruce';
 import { SeguimientoLote } from './seguimiento-lote';
 import { contarSinCompletar, motivosSinAprobar } from './revision.reglas';
-import { centavos, ESTADOS, periodo, Permisos, pesos } from './revision.util';
+import { centavos, ESTADOS, nombreEmpresa, periodo, Permisos, pesos, tieneNombre } from './revision.util';
 import { VersionesLote } from './versiones-lote';
 
 /**
@@ -21,7 +22,7 @@ import { VersionesLote } from './versiones-lote';
  */
 @Component({
   selector: 'app-revision',
-  imports: [AccionesLote, BandejaLotes, DatePipe, GestorLote, HistorialLote, MarcadorCruce, RouterLink, SeguimientoLote, VersionesLote],
+  imports: [AccionesLote, BandejaLotes, DatePipe, ExcelLote, GestorLote, HistorialLote, MarcadorCruce, RouterLink, SeguimientoLote, VersionesLote],
   templateUrl: './revision.html',
 })
 export class RevisionPantalla {
@@ -32,6 +33,10 @@ export class RevisionPantalla {
   protected readonly periodo = periodo;
 
   protected readonly d = this.store.detalle;
+  /** El título: la razón social, o la CUIT si no hay. */
+  protected readonly nombre = computed(() => nombreEmpresa(this.d()?.lote.empresa, this.d()?.lote.cuit_empresa));
+  /** La CUIT al costado solo si el título no es ya la CUIT. */
+  protected readonly cuitAparte = computed(() => tieneNombre(this.d()?.lote.empresa) && !!this.d()?.lote.cuit_empresa);
   private readonly ruta = inject(ActivatedRoute);
   /** Al llegar recién generado (o desde un aviso), ya viene elegido. */
   protected readonly seleccionId = signal<string | null>(this.ruta.snapshot.queryParamMap.get('lote'));

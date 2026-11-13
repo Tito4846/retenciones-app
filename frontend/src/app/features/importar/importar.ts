@@ -13,7 +13,6 @@ import { ConciliacionStore } from '../../core/services/conciliacion.store';
 import { LotesStore } from '../../core/services/lotes.store';
 import { ConexionesStore } from '../../core/services/conexiones.store';
 import { Ayuda } from '../../core/ui/ayuda.directive';
-import { Plegable } from '../../core/ui/plegable';
 import { ConsultaArca } from './consulta-arca';
 
 type TipoArchivo = 'arca' | 'mayor';
@@ -30,21 +29,13 @@ interface ZonaCarga {
 
 @Component({
   selector: 'app-importar',
-  imports: [Ayuda, ConsultaArca, DecimalPipe, Plegable],
+  imports: [Ayuda, ConsultaArca, DecimalPipe],
   templateUrl: './importar.html',
 })
 export class Importar {
   protected readonly store = inject(ConciliacionStore);
   protected readonly conexiones = inject(ConexionesStore);
   private readonly lotes = inject(LotesStore);
-
-  /** Cómo se arma una conciliación: un mes, una empresa y un impuesto, de los dos lados. */
-  protected readonly pasos = [
-    { titulo: 'Período y empresa', ayuda: 'Las fechas a analizar y la CUIT del cliente.' },
-    { titulo: 'Excel de ARCA', ayuda: 'Mis Retenciones filtrado por esa CUIT, el impuesto y las fechas.' },
-    { titulo: 'Excel de Xubio', ayuda: 'El Libro Mayor de la cuenta de retenciones de ese impuesto, mismas fechas.' },
-    { titulo: 'Cruce', ayuda: 'Comprobante contra comprobante: faltantes de cada lado.' },
-  ];
 
   protected readonly zonas = computed<ZonaCarga[]>(() => [
     {

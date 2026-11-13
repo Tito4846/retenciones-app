@@ -1,4 +1,16 @@
+import { formatearCuit } from '../../core/cuit.pipe';
 import { EstadoLote } from '../../core/models/lote.models';
+
+/** Si el lote trae una razón social de verdad (el servidor guarda «Sin nombre» cuando no hay). */
+export function tieneNombre(empresa: string | null | undefined): boolean {
+  const e = (empresa ?? '').trim();
+  return !!e && e.toLowerCase() !== 'sin nombre';
+}
+
+/** La razón social, o la CUIT con guiones cuando no hay nombre. */
+export function nombreEmpresa(empresa: string | null | undefined, cuit: string | null | undefined): string {
+  return tieneNombre(empresa) ? (empresa ?? '').trim() : formatearCuit(cuit) || 'Sin CUIT';
+}
 
 export const ESTADOS: Record<EstadoLote, { titulo: string; clase: string; punto: string }> = {
   borrador: { titulo: 'En preparación', clase: 'bg-slate-100 text-slate-700 ring-slate-200', punto: 'bg-slate-400' },

@@ -1,8 +1,8 @@
 import { Component, inject, signal } from '@angular/core';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
-import { Usuario } from './core/models/lote.models';
 import { LotesStore } from './core/services/lotes.store';
-import { SesionService, USUARIOS_DE_PRUEBA } from './core/services/sesion.service';
+import { SesionService } from './core/services/sesion.service';
+import { PerfilUsuario } from './core/ui/perfil-usuario';
 
 const CLAVE_MENU = 'retenciones.menu_plegado';
 
@@ -15,7 +15,7 @@ function leerPlegada(): boolean {
 }
 
 @Component({
-  imports: [RouterOutlet, RouterLink, RouterLinkActive],
+  imports: [PerfilUsuario, RouterOutlet, RouterLink, RouterLinkActive],
   selector: 'app-root',
   styleUrl: './app.css',
   templateUrl: './app.html',
@@ -24,13 +24,6 @@ export class App {
   /** Para el contador de la bandeja de revisión en el menú. */
   protected readonly lotes = inject(LotesStore);
   protected readonly sesion = inject(SesionService);
-  protected readonly usuariosDePrueba = USUARIOS_DE_PRUEBA;
-
-  /** «Administrador · Supervisor»: el nivel de ContadorWeb y el rol que le da acá. */
-  protected rolesDe(u: Usuario): string {
-    const roles = u.roles.map((r) => (r === 'supervisor' ? 'Supervisor' : 'Empleado')).join(' · ') || 'Sin rol';
-    return u.nivel_nombre ? `${u.nivel_nombre} · ${roles}` : roles;
-  }
 
   /** Menú plegado (solo íconos). Se recuerda en este navegador. */
   protected readonly plegada = signal(leerPlegada());
@@ -42,10 +35,5 @@ export class App {
     } catch {
       // Sin almacenamiento (modo privado): queda plegada solo hasta recargar.
     }
-  }
-
-  protected iniciales(nombre: string): string {
-    const partes = nombre.match(/\p{L}+/gu) ?? [];
-    return ((partes[0]?.[0] ?? '?') + (partes[1]?.[0] ?? '')).toUpperCase();
   }
 }

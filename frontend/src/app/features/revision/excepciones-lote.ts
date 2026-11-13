@@ -13,48 +13,46 @@ const ORDEN: EstadoFila[] = ['falta_accion', 'falta_comprobante', 'en_revision',
 @Component({
   selector: 'app-excepciones-lote',
   imports: [FilaPartida],
-  host: { class: 'mt-2 block' },
+  host: { class: 'block' },
   template: `
+    <div class="mb-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+      <ng-content />
     @if (pendientes() && pendientes() < partidas().length) {
-      <div class="mb-2 flex gap-1 text-xs font-semibold" role="group" aria-label="Filtrar excepciones">
-        <button type="button" (click)="filtro.set('todas')" [attr.aria-pressed]="filtro() === 'todas'" class="rounded-full border px-3 py-1"
+      <div class="ml-auto flex gap-1 text-xs font-semibold" role="group" aria-label="Filtrar excepciones">
+        <button type="button" (click)="filtro.set('todas')" [attr.aria-pressed]="filtro() === 'todas'" class="rounded-full border px-2.5 py-0.5"
           [class]="filtro() === 'todas' ? 'border-brand-700 bg-brand-700 text-white' : 'border-line bg-white hover:border-brand-300'">Todas ({{ partidas().length }})</button>
-        <button type="button" (click)="filtro.set('pendientes')" [attr.aria-pressed]="filtro() === 'pendientes'" class="rounded-full border px-3 py-1"
+        <button type="button" (click)="filtro.set('pendientes')" [attr.aria-pressed]="filtro() === 'pendientes'" class="rounded-full border px-2.5 py-0.5"
           [class]="filtro() === 'pendientes' ? 'border-brand-700 bg-brand-700 text-white' : 'border-line bg-white hover:border-brand-300'">Sin completar ({{ pendientes() }})</button>
       </div>
     }
+    </div>
     <!-- Anchos fijos: la tabla entra en el panel y el agente se queda con lo que sobra -->
     <table class="w-full table-fixed border-separate border-spacing-0 border-y border-line bg-white text-left text-[13px]" aria-label="Excepciones del lote">
       <colgroup>
         <col />
+        <col class="w-18" />
+        <col class="w-26" />
+        <col class="w-26" />
+        <col class="w-26" />
+        <col class="w-36" />
         <col class="w-21" />
-        <col class="w-23" />
-        <col class="w-23" />
-        <col class="w-24" />
-        <col class="w-23" />
-        <col class="w-24" />
       </colgroup>
       <!-- Pegada debajo del panel de totales, que también queda fijo -->
-      <thead class="sticky top-16 z-10 text-muted [&_th]:bg-canvas">
-        <tr>
-          <th scope="col" class="px-2 py-2 font-semibold">Agente / Proveedor</th>
-          <th scope="col" class="px-2 py-2 font-semibold">Comprobante</th>
-          <th scope="col" class="px-2 py-2 text-right font-semibold" title="Importe registrado en el Libro Mayor">Monto Sistema</th>
-          <th scope="col" class="px-2 py-2 text-right font-semibold">Monto ARCA</th>
-          <th scope="col" class="px-2 py-2 text-right font-semibold">Diferencia</th>
-          <th scope="col" class="px-2 py-2 font-semibold">Motivo</th>
-          <th scope="col" class="px-2 py-2 text-right font-semibold"><span class="sr-only">Acciones</span></th>
+      <thead class="sticky top-13 z-10 text-muted [&_th]:bg-canvas">
+        <tr class="[&_th]:px-2 [&_th]:py-1.5 [&_th]:font-semibold [&_th]:whitespace-nowrap">
+          <th scope="col">Agente / Proveedor</th>
+          <th scope="col">Comprobante</th>
+          <th scope="col" class="text-right" title="Importe registrado en el Libro Mayor">Monto Sistema</th>
+          <th scope="col" class="text-right">Monto ARCA</th>
+          <th scope="col" class="text-right">Diferencia</th>
+          <th scope="col">Motivo</th>
+          <th scope="col"><span class="sr-only">Acciones</span></th>
         </tr>
       </thead>
       @for (f of filas(); track f.partida.clave) {
         <tbody [appFilaPartida]="f.partida" [estado]="f.estado" [adjuntos]="f.adjuntos" [loteId]="loteId()" [version]="version()" [editar]="editar()"></tbody>
       }
     </table>
-    @if (editar()) {
-      <p class="mt-2 text-xs text-muted">
-        Arrastrá el PDF del certificado o la nota de crédito sobre la fila que respalda. Para cambiar muchas partidas a la vez sigue andando el Excel.
-      </p>
-    }
   `,
 })
 export class ExcepcionesLote {

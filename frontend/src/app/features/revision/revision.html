@@ -1,6 +1,6 @@
 <h1 class="sr-only">Revisión</h1>
 
-<div class="grid gap-4 xl:h-[calc(100vh-5rem)] xl:grid-cols-[minmax(0,35fr)_minmax(0,65fr)]">
+<div class="grid gap-4 xl:h-[calc(100vh-5rem)] xl:grid-cols-[minmax(0,28fr)_minmax(0,72fr)]">
   <app-bandeja-lotes class="max-h-96 xl:max-h-none" [(seleccion)]="seleccionId" />
 
   @if (d(); as det) {
@@ -8,13 +8,13 @@
     <!-- En pantallas chicas no recorta: los totales se pegan arriba de la ventana -->
     <section class="flex min-h-0 min-w-0 flex-col rounded-2xl border border-line bg-canvas xl:overflow-hidden">
       <!-- De quién es el lote y en qué paso está -->
-      <header class="space-y-3 rounded-t-2xl border-b border-line bg-white p-3">
-        <div class="flex flex-wrap items-center gap-2">
-          <h2 class="min-w-0 truncate text-lg font-semibold" [title]="det.lote.empresa">{{ det.lote.empresa }}</h2>
+      <header class="space-y-1 rounded-t-2xl border-b border-line bg-white px-3 py-2">
+        <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <h2 class="min-w-0 truncate text-base font-semibold" [title]="nombre()">{{ nombre() }}</h2>
           <span class="rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1" [class]="estados[det.lote.estado].clase">{{ estados[det.lote.estado].titulo }}</span>
           @if (det.lote.rectifica_a) { <span class="rounded-full bg-violet-50 px-2.5 py-0.5 text-xs font-semibold text-violet-700">Rectificativo</span> }
           <p class="ml-auto text-xs text-muted">
-            @if (det.lote.cuit_empresa) { CUIT {{ det.lote.cuit_empresa }} · }{{ periodo(det.lote.periodo) }} · v{{ det.lote.version_vigente }}
+            @if (cuitAparte()) { CUIT {{ det.lote.cuit_empresa }} · }{{ periodo(det.lote.periodo) }} · v{{ det.lote.version_vigente }}
           </p>
         </div>
         <app-seguimiento-lote [detalle]="det" />
@@ -39,13 +39,14 @@
         </div>
       }
 
-      <div class="min-h-0 flex-1 space-y-4 p-3 xl:overflow-y-auto">
+      <div class="min-h-0 flex-1 space-y-2 p-3 xl:overflow-y-auto">
         <!--
-          Totales siempre a la vista: sticky dentro del panel (en xl) o de la ventana.
-          Asoma 4rem (h-14 + pb-2; el pt-3 queda tapado): la cabecera de la tabla va en top-16.
+          Totales y Excel siempre a la vista: sticky dentro del panel (en xl) o de la ventana.
+          Asoma 3.25rem (h-11 + pb-2; el pt-3 queda tapado): la cabecera de la tabla va en top-13.
         -->
-        <div class="sticky -top-3 z-20 -mx-3 -mt-3 border-b border-line bg-canvas/95 px-3 pt-3 pb-2 backdrop-blur">
-          <app-marcador-cruce class="h-14" [sistema]="totales().sistema" [declarado]="totales().declarado" />
+        <div class="sticky -top-3 z-20 -mx-3 -mt-3 flex gap-2 border-b border-line bg-canvas/95 px-3 pt-3 pb-2 backdrop-blur">
+          <app-marcador-cruce class="h-11 min-w-0 flex-1" [sistema]="totales().sistema" [declarado]="totales().declarado" />
+          <app-excel-lote class="h-11 shrink-0" [detalle]="det" [editar]="p.editar" [revisar]="p.revisar" />
         </div>
 
         @if (p.editar && det.lote.estado === 'rechazado' && ultimoRechazo(); as r) {

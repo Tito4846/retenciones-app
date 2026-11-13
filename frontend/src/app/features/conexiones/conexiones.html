@@ -4,12 +4,7 @@
       <path d="M9 2v6" /><path d="M15 2v6" /><path d="M12 17v5" /><path d="M5 8h14v3a7 7 0 0 1-14 0z" />
     </svg>
   </div>
-  <div>
-    <h1 class="text-2xl font-semibold">Conexiones</h1>
-    <p class="mt-1 text-lg text-muted">
-      Conectá los bots de ARCA y Xubio para traer las retenciones y el Libro Mayor sin descargar archivos a mano.
-    </p>
-  </div>
+  <h1 class="self-center text-2xl font-semibold">Conexiones</h1>
 </header>
 
 @if (store.sinServidor()) {
@@ -23,17 +18,7 @@
 
 <!-- Lo mismo en los dos formularios: por qué es seguro poner la clave acá -->
 <ng-template #avisoSeguridad>
-  <div class="flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 sm:col-span-2">
-    <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white" aria-hidden="true">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4">
-        <rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" />
-      </svg>
-    </span>
-    <p>
-      <span class="font-semibold">Tus claves no se guardan.</span>
-      Se usan solo para iniciar sesión: no se escriben en disco ni en la base de datos, y se borran al desconectar.
-    </p>
-  </div>
+  <p class="text-xs text-muted sm:col-span-2">Las claves no se guardan: se usan solo para entrar y se borran al desconectar.</p>
 </ng-template>
 
 <div class="grid items-start gap-6 xl:grid-cols-2">

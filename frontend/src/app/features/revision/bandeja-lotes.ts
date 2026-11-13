@@ -4,7 +4,7 @@ import { EstadoLote, LoteListado } from '../../core/models/lote.models';
 import { LotesStore } from '../../core/services/lotes.store';
 import { SesionService } from '../../core/services/sesion.service';
 import { progreso } from './revision.reglas';
-import { CONCILIADO, ESTADOS, hace, iniciales, periodo, pesos, quienArmo } from './revision.util';
+import { CONCILIADO, ESTADOS, hace, iniciales, nombreEmpresa, periodo, pesos, quienArmo, tieneNombre } from './revision.util';
 
 type Bandeja = 'mias' | 'espera' | 'cerrados';
 
@@ -50,11 +50,11 @@ const PESTANAS: { id: Bandeja; titulo: string }[] = [
             [attr.aria-current]="store.detalle()?.lote?.id === l.id ? 'true' : null"
             [class]="(store.detalle()?.lote?.id === l.id ? 'bg-brand-50 ' : 'hover:bg-canvas ') + (paraMi ? 'border-amber-400' : 'border-transparent')">
             <div class="flex items-start justify-between gap-2">
-              <p class="min-w-0 truncate font-semibold" [title]="l.empresa">{{ l.empresa }}</p>
+              <p class="min-w-0 truncate font-semibold" [title]="nombreEmpresa(l.empresa, l.cuit_empresa)">{{ nombreEmpresa(l.empresa, l.cuit_empresa) }}</p>
               <span class="shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ring-1" [class]="estados[l.estado].clase">{{ estados[l.estado].titulo }}</span>
             </div>
             <p class="mt-1 truncate text-xs text-muted">
-              @if (l.cuit_empresa) { CUIT {{ l.cuit_empresa }} · }{{ periodo(l.periodo) }}
+              @if (l.cuit_empresa && tieneNombre(l.empresa)) { CUIT {{ l.cuit_empresa }} · }{{ periodo(l.periodo) }}
             </p>
             <div class="mt-1 flex items-baseline justify-between gap-2">
               <p class="min-w-0 truncate text-xs text-muted" [title]="impuestos(l)">{{ impuestos(l) }}</p>
@@ -69,7 +69,7 @@ const PESTANAS: { id: Bandeja; titulo: string }[] = [
             @if (excepciones(l); as n) {
               @let avance = progreso(n, l.sin_completar);
               <div class="mt-2 flex items-center gap-2" role="progressbar" [attr.aria-valuenow]="avance" aria-valuemin="0" aria-valuemax="100"
-                [attr.aria-label]="'Excepciones resueltas de ' + l.empresa">
+                [attr.aria-label]="'Excepciones resueltas de ' + nombreEmpresa(l.empresa, l.cuit_empresa)">
                 <div class="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-200">
                   <div class="h-full rounded-full transition-[width] duration-500" [style.width.%]="avance"
                     [class]="avance === 100 ? 'bg-emerald-500' : avance >= 50 ? 'bg-amber-500' : 'bg-red-500'"></div>
@@ -114,6 +114,8 @@ export class BandejaLotes {
   protected readonly pestanas = PESTANAS;
   protected readonly pesos = pesos;
   protected readonly periodo = periodo;
+  protected readonly nombreEmpresa = nombreEmpresa;
+  protected readonly tieneNombre = tieneNombre;
   protected readonly iniciales = iniciales;
   /** (total_excepciones − sin_completar) / total_excepciones. */
   protected readonly progreso = progreso;
@@ -206,7 +208,7 @@ export class BandejaLotes {
       case 'borrador':
         return l.maker_id === yo ? 'Te toca completarlo y enviarlo' : `Lo está preparando ${l.maker_nombre}`;
       case 'pendiente':
-        return l.autores.includes(yo) ? 'Esperando que lo tome un supervisor' : 'Listo para que alguien lo revise';
+        return l.autores.includes(yo) ? 'Esperando supervisor' : 'Para revisar';
       case 'en_revision':
         return l.checker_id === yo ? 'Lo estás revisando vos' : `Lo está revisando ${l.checker_nombre}`;
       case 'rechazado':
