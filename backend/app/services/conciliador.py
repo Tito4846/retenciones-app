@@ -263,15 +263,12 @@ def conciliar_retenciones(
     """
     tolerancia = settings.TOLERANCIA_DIAS if tolerancia_dias is None else tolerancia_dias
 
-    # 1) Normalizacion.
     arca = [normalizar_arca(r) for r in arca]
     mayor = [normalizar_mayor(m) for m in mayor]
 
-    # 2) Cruce.
     pares = _cruzar(arca, mayor, tolerancia, pares_manuales or {})
     usados_mayor = {j for j, _ in pares.values()}
 
-    # 3) Clasificacion.
     conciliados = []
     for i in _por_fecha(arca, pares):
         j, criterio = pares[i]

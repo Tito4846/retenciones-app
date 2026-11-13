@@ -21,9 +21,7 @@ class Settings(BaseSettings):
     EMPRESA: str = ""
     LOGO_EMPRESA: str = str(RAIZ_BACKEND / "app" / "assets" / "logos" / "logo.png")
 
-    # ------------------------------------------------------------------
     # Usuario (ver app/core/usuarios.py)
-    # ------------------------------------------------------------------
     # No hay ingreso propio: la identidad la da ContadorWeb con un pase firmado.
     # El MISMO valor en el servicio de ContadorWeb (mínimo 32 caracteres).
     # Vacío = modo local: encabezados X-Usuario-* o el usuario por defecto.
@@ -51,9 +49,7 @@ class Settings(BaseSettings):
     # Descargas de los bots y perfil de Chrome de Xubio. Fuera de git.
     DIRECTORIO_DATOS: Path = RAIZ_BACKEND / "datos"
 
-    # ------------------------------------------------------------------
-    # Chrome de los bots (mismo criterio que Arca-bot)
-    # ------------------------------------------------------------------
+    # Chrome de los bots
     # ARCA suele bloquear el modo headless, y el doble factor se completa a
     # mano en la ventana: por defecto se ve.
     HEADLESS: bool = False
@@ -62,9 +58,7 @@ class Settings(BaseSettings):
     # Minimizar la ventana una vez conectado (sigue trabajando en la barra).
     MINIMIZAR_VENTANA: bool = True
 
-    # ------------------------------------------------------------------
     # ARCA: login y servicio "Mis Retenciones"
-    # ------------------------------------------------------------------
     ARCA_URL_LOGIN: str = "https://auth.afip.gob.ar/contribuyente_/login.xhtml"
     ARCA_SEL_CUIT_LOGIN: str = "id=F1:username"
     ARCA_SEL_BTN_SIGUIENTE: str = "id=F1:btnSiguiente"
@@ -100,9 +94,7 @@ class Settings(BaseSettings):
     TIMEOUT_2FA_MS: int = 120000
     RETRASO_TIPEO_MS: int = 30
 
-    # ------------------------------------------------------------------
     # Xubio: ingreso por Visma Connect y Libro Mayor por webreport
-    # ------------------------------------------------------------------
     XUBIO_URL: str = "https://xubio.com/NXV/vismaConnect/login"
     # Cuenta del estudio (opcional). Con los dos, el bot escribe el ingreso
     # solo; el reCAPTCHA lo resuelve la persona en la ventana.

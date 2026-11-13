@@ -71,9 +71,7 @@ ANCHOS_ARCA = [20.6, 40, 8.6, 32.3, 8.3, 60, 15.1, 16.9, 19.9, 16.3, 19.1, 17.9,
 ANCHOS_MAYOR = [10.1, 26.6, 36.4, 12.9, 12.9, 13.1, 40, 31.1, 15.4]
 
 
-# ----------------------------------------------------------------------
 # Utilidades
-# ----------------------------------------------------------------------
 
 def _columnas_por_rol(encabezados: list[str]) -> dict[str, int]:
     """{FECHA: 0, DEBE: 3, ...}: solo encabezados que coinciden exacto con un alias."""
@@ -151,9 +149,7 @@ def _ensanchar_para_numeros(hoja: Worksheet) -> None:
             dimension.width = largo
 
 
-# ----------------------------------------------------------------------
 # Hoja ARCA
-# ----------------------------------------------------------------------
 
 def _original_arca(r: dict) -> dict:
     """La fila tal cual vino; si no se tiene, armada con los datos leidos."""
@@ -201,9 +197,7 @@ def _armar_arca(hoja: Worksheet, arca: list[dict], conciliados: set[str]) -> str
     return None
 
 
-# ----------------------------------------------------------------------
 # Hoja LIBRO MAYOR
-# ----------------------------------------------------------------------
 
 def _original_mayor(m: dict) -> dict:
     if m.get("original"):
@@ -453,9 +447,7 @@ def _tipo_arca(r: dict) -> str:
     return {"Retencion": "RETENCION", "Percepcion": "PERCEPCION"}.get(r.get("tipo") or "", "RETENCION")
 
 
-# ----------------------------------------------------------------------
 # Entrada
-# ----------------------------------------------------------------------
 
 def exportar(resultado: dict, entrada) -> bytes:
     """

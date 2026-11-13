@@ -1,210 +1,358 @@
 # Conciliación de Retenciones ARCA
 
-Aplicación para conciliar las retenciones y percepciones sufridas que figuran en
-**ARCA (Mis Retenciones)** contra el **Libro Mayor de Xubio**, y exportar el
-resultado como papel de trabajo en Excel.
+Módulo de **ContadorWeb** que concilia las retenciones y percepciones sufridas que informa
+**ARCA (Mis Retenciones)** contra el **Libro Mayor de Xubio**. El resultado sale como papel de
+trabajo en Excel y pasa por un circuito de revisión con dos personas (Maker-Checker) antes
+de quedar aprobado para la DDJJ.
 
-- **backend/** — API en FastAPI (Python). Importa archivos, concilia, exporta a
-  Excel y maneja los bots de Chrome (Playwright) que se conectan a ARCA y Xubio.
-- **frontend/** — Angular 22 con SSR y Tailwind CSS.
+**Repositorio:** https://github.com/Tito4846/retenciones-app
 
-## Requisitos
+Este README es para el programador que tenga que tocar el código o subirlo a un servidor.
+El diseño detallado de la revisión (estados, hashes, auditoría) está en
+[docs/diseno-revision.md](docs/diseno-revision.md).
+
+---
+
+## Índice
+
+1. [Stack](#stack)
+2. [Arranque rápido](#arranque-rápido)
+3. [Cómo funciona, de punta a punta](#cómo-funciona-de-punta-a-punta)
+4. [Estructura del código](#estructura-del-código)
+5. [Reglas del cruce](#reglas-del-cruce)
+6. [Revisión (Maker-Checker)](#revisión-maker-checker)
+7. [Usuarios y sesión (ContadorWeb)](#usuarios-y-sesión-contadorweb)
+8. [API](#api)
+9. [Datos y persistencia](#datos-y-persistencia)
+10. [Configuración](#configuración)
+11. [Tests](#tests)
+12. [Despliegue](#despliegue)
+13. [Cambios típicos](#cambios-típicos)
+14. [Problemas conocidos](#problemas-conocidos)
+
+---
+
+## Stack
+
+| Parte | Tecnología |
+|---|---|
+| Backend | Python 3.14 · FastAPI · Uvicorn · pandas / openpyxl · SQLite · Playwright (bots) |
+| Frontend | Angular 22 (standalone, signals) · Tailwind CSS 4 · Vitest |
+| Dependencias | [uv](https://docs.astral.sh/uv/) para Python, npm para Node |
+| Producción | Una sola imagen Docker: el backend sirve la API en `/api` y el front compilado en `/` |
+
+---
+
+## Arranque rápido
+
+### Requisitos
 
 | Herramienta | Versión | Para qué |
 |---|---|---|
-| [uv](https://docs.astral.sh/uv/) | reciente | Maneja Python y las dependencias del backend |
-| Python | 3.14 (lo descarga `uv` solo, ver `backend/.python-version`) | Backend |
-| Node.js | 22 o superior (probado con 24) | Frontend |
+| [uv](https://docs.astral.sh/uv/) | reciente | Instala Python 3.14 y las dependencias del backend |
+| Node.js | 22 o más (probado con 24) | Frontend |
 | npm | 11 | Frontend |
 | Google Chrome | instalado | Los bots usan el Chrome del sistema (no hace falta `playwright install`) |
 
-## Instalación
+### Instalar
 
 ```bash
-cd backend
+git clone https://github.com/Tito4846/retenciones-app.git
+```
+
+```bash
+cd retenciones-app/backend
 uv sync
 ```
 
 ```bash
-cd frontend
+cd retenciones-app/frontend
 npm ci
 ```
 
-> Ejecutá `uv sync` desde una terminal normal (PowerShell, CMD o la de VS Code).
-> Si se ejecuta desde una app empaquetada de Windows (por ejemplo, el desktop de
-> Claude), Windows guarda el Python descargado en una carpeta virtualizada de
-> esa app y después falla con *"did not find executable at
-> ...\uv\python\cpython-3.14...\python.exe"* o *"Missing expected target
-> directory for Python minor version link"*. Para arreglarlo, borrá
-> `backend/.venv` y volvé a ejecutar `uv sync` desde tu terminal.
+### Levantar en desarrollo
 
-### Configuración (opcional)
+Dos terminales, desde la raíz del repo.
 
-El backend funciona sin configuración. Para cambiar valores, copiá el ejemplo y
-editalo:
-
-```bash
-cp backend/.env.example backend/.env
-```
-
-Variables principales:
-
-| Variable | Default | Descripción |
-|---|---|---|
-| `TOLERANCIA_DIAS` | `5` | Días de diferencia aceptados entre la fecha de ARCA y la del asiento |
-| `EMPRESA` | vacío | Nombre que aparece en el membrete del Excel |
-| `HEADLESS` | `false` | Chrome visible (necesario para el doble factor de ARCA y el captcha de Xubio) |
-| `ARCA_SERVICIO` | `Mis Retenciones` | Nombre del servicio en el buscador del portal de ARCA |
-| `ARCA_RENOVAR_SESION_MIN` | `50` | La sesión de ARCA se renueva sola con la misma CUIT y clave (solo en memoria mientras la ventana está abierta) cuando vence y, antes, a estos minutos sin uso. `0` = solo cuando vence. Con doble factor solo se renueva al vencer |
-| `ARCA_MANTENER_PORTAL_MIN` | `9` | Cada estos minutos el bot le avisa al portal de ARCA (con las cookies de la ventana) para que no cierre la sesión por inactividad (~15 min). Si igual vence, primero reabre Mis Retenciones con las cookies y, si el portal también venció, entra de nuevo con la CUIT y la clave. `0` = no avisar |
-| `XUBIO_USUARIO` / `XUBIO_CLAVE` | vacío | Si se completan, el bot escribe el ingreso a Xubio solo |
-| `XUBIO_CUENTAS_RETENCIONES` | `retencion,retenciones,percepcion,percepciones` | Palabras que identifican las cuentas de retenciones |
-| `CORS_ORIGINS` | `[]` | Orígenes extra permitidos (cualquier `localhost` ya está permitido) |
-
-La lista completa está en `backend/app/core/config.py`. La URL de la API que usa
-el frontend está en `frontend/src/environments/environment.ts`
-(`http://localhost:8001/api`).
-
-## Levantar en desarrollo
-
-Desde la raíz del proyecto, en dos terminales:
-
-**Backend** (http://localhost:8001, docs en http://localhost:8001/docs):
+Backend en http://localhost:8001 (documentación interactiva en http://localhost:8001/docs):
 
 ```bash
 uv run --directory backend uvicorn app.main:app --port 8001 --reload --reload-dir app
 ```
 
-**Frontend** (http://localhost:4200):
+Frontend en http://localhost:4200:
 
 ```bash
 npm --prefix frontend start
 ```
 
-Abrí http://localhost:4200 en el navegador. Para comprobar que el backend
-responde: http://localhost:8001/api/salud devuelve `{"status":"ok"}`.
+Para comprobar que el backend responde: http://localhost:8001/api/salud devuelve `{"status":"ok"}`.
 
-## Cómo concilia
+Sin `RETENCIONES_MODULO_SECRETO` la app arranca en **modo local**: no hace falta ContadorWeb y
+el usuario se elige tocando el perfil abajo a la izquierda (ver
+[Usuarios y sesión](#usuarios-y-sesión-contadorweb)).
 
-Cada conciliación es **un mes cerrado, una empresa (CUIT) y un impuesto**, de los dos lados:
+---
 
-1. Mes y empresa: del 1 al último día del mes, con la CUIT del retenido.
-2. ARCA: Mis Retenciones filtrado por esa CUIT, el impuesto y el mes.
-3. Xubio: con la cuenta con la que se entró en Conexiones, el bot hace el recorrido de
-   una persona: entra a Contabilidad → Libro Mayor, en «Elige los
-   filtros» pone las mismas fechas que ARCA y en «Cuenta» escribe el impuesto y elige,
-   entre las cuentas del plan de la empresa, la del tipo consultado («Retenciones de
-   Ganancias sufridas», «Percepciones de IVA sufridas»…; con «Retención y/o Percepción»,
-   las dos). Toca Aceptar y se queda con lo que carga Xubio. Si el menú no lleva a Libro
-   Mayor, poné su dirección en `XUBIO_URL_LIBRO_MAYOR` del `.env`; si la pantalla falla,
-   queda una captura en `backend/datos/debug` y el bot sigue con el reporte del mayor.
-4. Cruce comprobante contra comprobante. Si los dos archivos no son del mismo mes o
-   impuesto, el resultado (y el Excel) lo avisan arriba de todo.
+## Cómo funciona, de punta a punta
 
-El cruce en sí:
+```text
+ ┌──────────── Importar ─────────────┐
+ │ Bots (Conexiones)  o  archivos    │
+ │ ARCA: Mis Retenciones (CSV/XLS)   │
+ │ Xubio: Libro Mayor (webreport)    │
+ └───────────────┬───────────────────┘
+                 ▼
+   services/tareas.py  ── tarea en segundo plano (task_id), el front la consulta cada 2 s
+                 ▼
+   importador_arca / importador_mayor  → normalizacion → conciliador (A/B/C)
+                 ▼
+   Pantalla Conciliación: revisar, emparejar a mano, corregir, avisar al cliente
+                 ▼
+   exportador.py → Excel (hojas ARCA y LIBRO MAYOR pintadas)
+                 ▼
+   services/lotes.py → lote v1 (partidas + Excel con RESUMEN, CONCILIACION, _META)
+                 ▼
+   Revisión: el empleado justifica/ajusta/adjunta y envía → un supervisor aprueba o devuelve
+                 ▼
+   Aprobado = inmutable (triggers SQLite) + exportación fiscal (CSV / TXT)
+```
 
-1. **Normalización**: fechas a un solo formato, CUIT sin guiones, importes numéricos
-   (`1.234,56` y `1,234.56` valen lo mismo) y comprobantes sin guiones ni ceros a la
-   izquierda (`0001-00012345` → `100012345`). Ver `backend/app/services/normalizacion.py`.
-2. **Cruce** uno a uno y con el importe exacto al centavo:
-   - clave principal: número de comprobante (el certificado de ARCA en el documento o
-     la descripción del asiento);
-   - clave secundaria: CUIT del agente de retención + importe;
-   - si el asiento no tiene CUIT: razón social parecida, o importe + fecha dentro de
-     `TOLERANCIA_DIAS`.
-   - mismo agente y fecha cercana con hasta $1 de diferencia (un redondeo al cargar el
-     asiento): se concilia y la diferencia queda a la vista;
-   - una percepción no va contra la cuenta de retenciones (ni al revés).
+Las pantallas del front son cuatro: **Importar**, **Conciliación**, **Solicitudes de revisión**
+y **Conexiones** (los bots).
 
-   No entran al cruce el saldo inicial, el asiento de apertura del ejercicio, las
-   aplicaciones a la DDJJ (Haber) ni las filas sin fecha (totales o anotaciones a mano).
+---
+
+## Estructura del código
+
+```text
+backend/
+  app/
+    main.py            Arma FastAPI: CORS, rutas, /api/salud, /api/yo, /api/sesion/entrar
+                       y sirve el front compilado si existe FRONT_DIST.
+    api/
+      rutas.py         Conciliación: subir archivos, estado de la tarea, pares a mano,
+                       correcciones y exportar el Excel.
+      conexiones.py    Bots: conectar/desconectar ARCA y Xubio, consultar Mis Retenciones,
+                       flujo automático (traer los dos lados y conciliar).
+      lotes.py         Lotes de revisión: versiones, partidas, adjuntos, transiciones,
+                       exportación fiscal, auditoría y notificaciones.
+    bots/
+      chrome.py        Opciones de lanzamiento de Chrome (contenedor, ventana minimizada).
+      navegador_arca.py  Hilo que maneja la ventana de ARCA: login, doble factor,
+                       renovación de sesión, mantener vivo el portal.
+      misret.py        Completa el formulario de Mis Retenciones y baja la exportación.
+      navegador_xubio.py Hilo de la ventana de Xubio: ingreso por Visma Connect.
+      libro_mayor_xubio.py Recorre Contabilidad → Libro Mayor y pide las cuentas del impuesto.
+      conexiones.py    Orquesta el flujo automático (Xubio → ARCA → cruce) y sus pasos.
+      bitacora.py      Mini-log en memoria que se muestra en la pantalla de Conexiones.
+    core/
+      config.py        Todas las variables de entorno (pydantic-settings) con su default.
+      db.py            SQLite: esquema, triggers de inmutabilidad, migraciones de columnas.
+      usuarios.py      Pase de ContadorWeb, tokens de sesión, niveles → roles, usuario_actual().
+    services/
+      importador_tablas.py  Lee CSV/XLS/XLSX y encuentra el encabezado aunque venga con títulos.
+      importador_arca.py    Export de Mis Retenciones → lista normalizada.
+      importador_mayor.py   Libro Mayor de Xubio (archivo o webreport XML) → lista normalizada.
+      normalizacion.py      Fechas, CUIT, importes y comprobantes a un solo formato.
+      impuestos.py          Códigos de ARCA ↔ nombre del impuesto; detectar impuesto en texto.
+      cuentas_xubio.py      Qué cuentas del plan de Xubio son de retenciones sufridas.
+      conciliador.py        El cruce y la clasificación A/B/C. Es el corazón del módulo.
+      exportador.py         Papel de trabajo en Excel (hojas ARCA y LIBRO MAYOR + control).
+      tareas.py             Tareas en memoria (task_id): estado, cancelar, rehacer el cruce.
+      partidas.py           Convierte el resultado del cruce en partidas del lote, con su código.
+      excel_lote.py         Excel del lote (RESUMEN, CONCILIACION protegida, _META oculta).
+      validacion_excel.py   Valida el Excel que vuelve a subir el empleado.
+      lotes.py              Ciclo de vida del lote: permisos, compuertas, versiones, aprobar.
+      auditoria.py          Auditoría append-only encadenada por hash.
+      migracion.py          Importa la bandeja anterior (JSON) la primera vez.
+      tools.py              Utilidades de lectura (fechas de Excel, nan, cancelación).
+    assets/logos/      Logo del membrete del Excel.
+  datos/               Base, archivos, descargas de los bots y perfiles de Chrome (fuera de git).
+  tests/               pytest (355 tests). Usan una base temporal: no tocan datos/.
+
+frontend/src/app/
+  app.ts / app.html    Layout: menú lateral plegable y perfil de usuario.
+  app.routes.ts        Rutas: /importar, /conciliacion, /revision, /conexiones.
+  app.config.ts        HttpClient (XHR, para el progreso de subida) e inicio de sesión.
+  core/
+    models/            Tipos de lo que devuelve la API (conciliación, conexiones, lotes).
+    services/          Acceso a la API y estado compartido con signals:
+      sesion.service.ts      Quién usa la app (pase de ContadorWeb o usuario de prueba).
+      conciliacion.service.ts / conciliacion.store.ts  Cruce en curso y su resultado.
+      conexiones.store.ts    Estado de los bots (se consulta cada 2 s).
+      lotes.store.ts         Bandeja de lotes, lote abierto y todas sus acciones.
+    ui/                Piezas reutilizables: confirmaciones, alertas, control segmentado,
+                       popconfirm, plegable, perfil de usuario.
+    cuit.pipe.ts       Formato 20-12345678-9.
+  features/
+    importar/          Consulta automática con los bots o subida manual de archivos.
+    conciliacion/      Resultado del cruce: tarjetas A/B/C, tabla editable con filtros
+                       tipo Excel, emparejar a mano, aviso al cliente, generar el lote.
+    revision/          Bandeja de lotes y el lote abierto (tabla de excepciones, totales,
+                       acciones del circuito). Las reglas de colores y trabas están en
+                       revision.reglas.ts (con tests).
+    conexiones/        Tarjetas de conexión de ARCA y Xubio.
+  environments/        URL de la API: localhost:8001 en desarrollo, /api en producción.
+
+Dockerfile             Imagen única (front compilado + backend + Chrome + Xvfb).
+render.yaml            Blueprint de Render.
+docs/                  Diseño del módulo de revisión.
+```
+
+---
+
+## Reglas del cruce
+
+Cada conciliación es **un período, una empresa (CUIT) y un impuesto**, de los dos lados.
+
+1. **Normalización** (`normalizacion.py`): fechas a un formato, CUIT sin guiones, importes
+   numéricos (`1.234,56` y `1,234.56` valen lo mismo) y comprobantes sin guiones ni ceros a la
+   izquierda (`0001-00012345` → `100012345`).
+2. **Cruce** (`conciliador.py`), uno a uno y por orden de confianza:
+   1. lo emparejado a mano por la persona;
+   2. número de comprobante (certificado de ARCA contra documento o descripción del asiento);
+   3. CUIT del agente + importe exacto (la fecha desempata);
+   4. asiento sin CUIT: razón social parecida, o importe + fecha dentro de `TOLERANCIA_DIAS`;
+   5. mismo agente y fecha cercana con hasta $ 1 de diferencia (redondeo): se concilia y la
+      diferencia queda a la vista.
+
+   Una percepción nunca va contra la cuenta de retenciones (ni al revés). No entran al cruce el
+   saldo inicial, el asiento de apertura, las aplicaciones a la DDJJ (Haber) ni filas sin fecha.
 3. **Clasificación**:
-   - **A · Conciliados**: coinciden en los dos lados.
-   - **B · Faltan en ARCA**: están en el Libro Mayor de Xubio pero ARCA no las informa (reclamo al agente).
+   - **A · Conciliados**: están en los dos lados.
+   - **B · Faltan en ARCA**: están en el Mayor y ARCA no las informa (reclamo al agente).
    - **C · Faltan en el Mayor**: ARCA las informa y no están registradas (ajuste contable).
 
-El resultado muestra cantidad y monto de cada categoría y los primeros 10 casos de B y C.
-El Excel trae dos pestañas con las planillas originales, lo conciliado pintado de amarillo:
-`ARCA` (el export de Mis Retenciones, con el total al pie) y `LIBRO MAYOR` (el mayor de Xubio
-con el saldo corrido). Debajo del mayor van dos apartados con su título: **Partidas de ARCA
-pendientes de registración** (lo que falta en el mayor, importe en el Debe) y **Partidas
-contabilizadas - revisar procedencia / revisar cliente** (lo que falta en ARCA, el mismo asiento
-con el importe en el Haber). Al pie, el control: **saldo ARCA** (el total de la hoja ARCA),
-**saldo Xubio** (el saldo corrido después de los dos apartados) y **dif**, que debería dar 0.
-Si no da 0, la dif queda en rojo y debajo van, también en rojo, los motivos con lo que suma cada
-uno (redondeos en conciliadas, saldo inicial o apertura, aplicaciones del Haber). En la pantalla, el cuadro «Diferencia ARCA − Mayor» hace lo mismo: lista
-los motivos y marca en rojo las filas responsables en el detalle.
+El Excel (`exportador.py`) copia las planillas originales en las hojas `ARCA` y `LIBRO MAYOR`,
+pinta lo conciliado y agrega debajo del mayor los dos apartados de faltantes y el control
+**saldo ARCA − saldo Xubio = dif**. Si la dif no da 0, la lista de motivos sale en rojo.
+
+---
 
 ## Revisión (Maker-Checker)
 
-El diseño completo está en [docs/diseno-revision.md](docs/diseno-revision.md). En resumen:
+- Al terminar el cruce el lote se arma solo (`/lotes/desde-cruce`) y se abre en **Solicitudes de
+  revisión**. Con archivos subidos a mano se genera desde Conciliación con «Generar Lote para
+  Revisión».
+- Cada partida que no concilió sola es una **excepción**. Se resuelve en su fila: **Ajustar**
+  (justificación, comentario e importe ajustado), **Descartar** (con motivo; deja de sumar pero
+  queda registrada) o soltar un **comprobante** (PDF/imagen) sobre la fila. Para cambios en
+  bloque se baja el Excel, se edita y se sube como versión nueva (`validacion_excel.py` dice qué
+  fila corregir si está mal).
+- Para enviar y para aprobar, la **diferencia neta** tiene que dar $ 0,00. Los importes de las
+  fuentes nunca se tocan: el ajuste va aparte.
+- Estados: `borrador → pendiente → en_revision → aprobado`, con `rechazado` (vuelve a quien
+  preparó, con motivo obligatorio) y `anulado`. **Quien preparó un lote nunca lo aprueba.**
+- **Aprobado es definitivo**: los triggers de SQLite no dejan cambiar nada del lote. Un error
+  posterior se corrige con un lote rectificativo. Se habilita la exportación fiscal (CSV y TXT).
+- Todo queda en la auditoría encadenada por hash (`GET /api/auditoria/verificar`).
 
-- Al terminar el cruce, el lote se arma solo y se abre en **Verificación**; si no quedó nada para resolver, va directo al supervisor. Con archivos subidos a mano, que no dicen de qué cliente son, se genera desde **Conciliación** con «Generar Lote para Revisión». Se crea la v1 del lote con
-  cada partida clasificada (Conciliado Automático, Diferencia de Monto, Pendiente de Comprobante,
-  No Localizado en ERP / en Fisco) y un código de discrepancia. El Excel suma las hojas
-  `RESUMEN` (la vista general), `CONCILIACION` (lo que falta va arriba; protegida: solo se editan Justificación, Comentario, Importe ajustado y Excluida) y `_META` (oculta).
-- **Revisión** es una bandeja: los lotes a la izquierda y, a la derecha, el lote con sus totales y su
-  gestor de archivos. El trabajo se hace en Excel: se baja, se completa cada excepción y se sube; si está
-  mal, la pantalla dice qué fila corregir. Los comprobantes se arrastran a la caja global y viajan con el
-  envío o la aprobación (un lote con excepciones lleva al menos uno).
-  La diferencia neta (ARCA contra Libro Mayor) tiene que quedar en $ 0,00 para enviar y para aprobar:
-  se resuelve con la columna **Importe ajustado** o marcando **Excluida** con un motivo. Los importes de las
-  fuentes no se tocan: el ajuste va aparte y una fila excluida sigue registrada.
-- El empleado también puede bajar el Excel, trabajarlo y subirlo como versión nueva: de cada fila, buscada por su Clave,
-  se toman las columnas de trabajo. Lo demás sale de la versión vigente: lo que se haya tocado se ignora y se avisa.
-- Al enviarlo, la versión queda sellada. Un supervisor que **no** lo haya preparado lo toma,
-  tilda los controles y lo devuelve (con motivo obligatorio: vuelve a quien lo preparó) o lo aprueba.
-  Mientras lo revisa puede corregirlo sin devolverlo: eso arma una versión nueva, la anterior queda
-  sellada y la tarjeta muestra «Editado por». Quien preparó un lote nunca lo aprueba.
-- **Aprobado es definitivo**: la base (triggers de SQLite) no deja cambiar nada del lote y se habilita
-  la exportación fiscal (libro CSV y TXT para la DDJJ). Un error posterior se corrige con un lote rectificativo.
-- Todo queda en una auditoría que no se puede editar ni borrar, encadenada por hash
-  (`GET /api/auditoria/verificar`, solo supervisor), con hora UTC, usuario e IP.
+---
 
-Los datos viven en `backend/datos/retenciones.db` y los archivos en `backend/datos/archivos/`
-(guardados por hash). La bandeja anterior (`datos/revisiones/indice.json`) se migra sola la primera vez.
+## Usuarios y sesión (ContadorWeb)
 
-**Roles:** hay dos. El **empleado** prepara los lotes (arma, justifica, adjunta, envía y anula los suyos). El
-**supervisor** hace todo eso y además revisa, aprueba o devuelve y se pasa un lote que tiene otro supervisor.
-Nadie aprueba un lote que preparó.
+El módulo **no tiene login propio**. La persona entra a ContadorWeb y abre Retenciones desde el
+menú. Los permisos salen de los niveles de acceso de ContadorWeb (`core/usuarios.py`):
 
-## Usuarios y roles (niveles de ContadorWeb)
-
-El módulo **no tiene ingreso propio**: la persona entra a **ContadorWeb** y abre Retenciones desde
-el menú, igual que el módulo de Planes de pago. Los permisos salen de los **niveles de acceso de
-ContadorWeb** (Configuración › Niveles de acceso) y se traducen así (`backend/app/core/usuarios.py`):
-
-| Nivel en ContadorWeb | Rol en Retenciones |
+| Nivel en ContadorWeb | Rol acá |
 |---|---|
-| 200 Administrador General · 100 Administrador · cualquier nivel con Configuración o todos los módulos | **supervisor** |
+| 200 Administrador General · 100 Administrador · niveles con Configuración o todos los módulos | **supervisor** |
 | Nivel con el módulo `Impuestos/Retenciones - Supervisión` | **supervisor** |
 | Nivel con el módulo `Impuestos/Retenciones` | **empleado** |
 | Cualquier otro | sin acceso (403) |
 
-**Cómo entra:** ContadorWeb firma un *pase* de un solo uso y abre `https://<retenciones>/?pase=<pase>`.
-El front lo canjea en `POST /api/sesion/entrar` por un token de sesión (`SESION_HORAS`, 12 h por
-defecto) que va en `Authorization: Bearer` en cada pedido. `GET /api/yo` devuelve quién es, su
-nivel de ContadorWeb y sus roles: con eso el front arma el menú.
+**Entrada:** ContadorWeb firma un *pase* de un solo uso y abre `https://<retenciones>/?pase=<pase>`.
+El front lo canjea en `POST /api/sesion/entrar` por un token (dura `SESION_HORAS`) que viaja en
+`Authorization: Bearer`. `GET /api/yo` devuelve el usuario y sus roles.
 
-El pase es el mismo formato que `firmar_pase` de ContadorWeb (`api/rutas/planes.py`), firmado con
+El pase usa el mismo formato que `firmar_pase` de ContadorWeb, firmado con
 `RETENCIONES_MODULO_SECRETO` (el **mismo valor** en los dos servicios, mínimo 32 caracteres):
 
 ```text
 base64url(JSON) + "." + base64url(HMAC-SHA256(RETENCIONES_MODULO_SECRETO, ese texto))
-JSON = {"u", "n", "exp", "id"} + lo que devuelve accesos.permisos(usuario):
-       {"nivel", "nivel_nombre", "config", "modulos", "general", "estudio", "estudio_nombre"}
+JSON = {"u", "n", "exp", "id"} + {"nivel", "nivel_nombre", "config", "modulos", "general", "estudio", "estudio_nombre"}
 ```
 
 Vence a los pocos minutos (más de 10 no se acepta) y no se puede usar dos veces.
 
-**Modo local** (sin `RETENCIONES_MODULO_SECRETO`): para trabajar en una computadora sin
-ContadorWeb. En el menú aparece el selector **Usuario de prueba** (Administrador General,
-Administrador, otro Administrador y Usuario) y cada pedido manda `X-Usuario-Id`, `-Nombre`,
-`-Nivel` y `-Modulos`. Sin encabezados, el pedido es del usuario por defecto
-(`USUARIO_POR_DEFECTO_*`, nivel 100). Con el secreto configurado esos encabezados se ignoran.
+**Modo local** (sin `RETENCIONES_MODULO_SECRETO`): cada pedido manda `X-Usuario-Id`, `-Nombre`,
+`-Nivel` y `-Modulos`, y el usuario de prueba se cambia desde el menú del perfil. Con el secreto
+configurado esos encabezados se ignoran. **En un servidor público el secreto es obligatorio.**
 
-> **En Render siempre va `RETENCIONES_MODULO_SECRETO`:** sin él, cualquiera puede mandar los
-> encabezados de prueba.
+---
+
+## API
+
+Todo bajo `/api`. La documentación interactiva completa está en `/docs` con el backend
+levantado.
+
+| Grupo | Rutas principales |
+|---|---|
+| Sesión | `GET /salud` · `GET /yo` · `POST /sesion/entrar` |
+| Conciliación | `POST /conciliar` (archivos) · `GET /estado/{task_id}` · `POST /cancelar/{task_id}` · `POST/DELETE /conciliacion/{task_id}/pares` · `POST /conciliacion/{task_id}/movimientos` · `GET /exportar/{task_id}` |
+| Bots | `GET /conexiones` · `POST/DELETE /conexiones/arca` · `POST /conexiones/arca/consultar` · `POST /conexiones/arca/cancelar` · `POST/DELETE /conexiones/xubio` · `POST /conexiones/automatico` |
+| Lotes | `GET/POST /lotes` · `POST /lotes/desde-cruce` · `GET /lotes/catalogo` · `GET /lotes/{id}` · versiones, `PATCH /lotes/{id}/partidas/{clave}`, adjuntos · `enviar`, `tomar`, `rechazar`, `aprobar`, `anular`, `rectificar` · exportaciones |
+| Auditoría | `GET /auditoria` · `GET /auditoria/verificar` · `GET /lotes/{id}/auditoria` · notificaciones |
+
+Los errores de lotes vuelven con `{"detail": {"codigo", "mensaje", "errores": [...]}}`.
+
+---
+
+## Datos y persistencia
+
+Todo vive en `DIRECTORIO_DATOS` (por defecto `backend/datos/`, en Docker `/var/data`):
+
+| Qué | Dónde |
+|---|---|
+| Base SQLite (lotes, versiones, partidas, auditoría, sesiones) | `retenciones.db` |
+| Excel de versiones y comprobantes, guardados por hash | `archivos/` |
+| Descargas de los bots y perfil de Chrome de Xubio | `descargas/`, `xubio_perfil/` |
+| Capturas cuando una pantalla de Xubio falla | `debug/` |
+
+Las tareas de conciliación (`task_id`) viven **en memoria** y vencen solas: si se reinicia el
+servidor se pierden las conciliaciones abiertas, no los lotes. La base no necesita servidor;
+las columnas nuevas se agregan solas al arrancar (`core/db.py`).
+
+**Backup:** alcanza con copiar `DIRECTORIO_DATOS` entero con el servicio parado (o
+`sqlite3 retenciones.db ".backup copia.db"` en caliente).
+
+---
+
+## Configuración
+
+Todas las variables están en `backend/app/core/config.py` con su default. Para desarrollo:
+
+```bash
+cp backend/.env.example backend/.env
+```
+
+| Variable | Default | Para qué |
+|---|---|---|
+| `RETENCIONES_MODULO_SECRETO` | vacío | Secreto compartido con ContadorWeb. Vacío = modo local. **Obligatorio en producción** |
+| `SESION_HORAS` | `12` | Duración del token de sesión |
+| `EMPRESA` | vacío | Nombre del membrete del Excel |
+| `TOLERANCIA_DIAS` | `5` | Días aceptados entre la fecha de ARCA y la del asiento |
+| `PERMITIR_ELIMINAR_CERRADOS` | `true` | Deja borrar lotes cerrados (para probar). **`false` con datos reales** |
+| `DIRECTORIO_DATOS` | `backend/datos` | Base, archivos y descargas |
+| `FRONT_DIST` | vacío | Carpeta del front compilado: si existe, el backend lo sirve |
+| `MAX_MB_ARCHIVO` | `20` | Tamaño máximo por archivo subido |
+| `CORS_ORIGINS` | `[]` | Orígenes extra (localhost ya está permitido). No hace falta si front y API van juntos |
+| `HEADLESS` | `false` | Chrome visible: necesario para el doble factor de ARCA y el captcha de Xubio |
+| `MINIMIZAR_VENTANA` | `true` | Minimiza la ventana del bot una vez conectado |
+| `ARCA_RENOVAR_SESION_MIN` | `50` | Renueva la sesión de ARCA a estos minutos sin uso (0 = solo al vencer) |
+| `ARCA_MANTENER_PORTAL_MIN` | `9` | Cada cuánto se le avisa al portal de ARCA que la sesión sigue en uso |
+| `XUBIO_USUARIO` / `XUBIO_CLAVE` | vacío | Cuenta del estudio: el bot escribe el ingreso solo |
+| `XUBIO_CUENTAS_RETENCIONES` | `retencion,…` | Palabras que identifican las cuentas de retenciones |
+| `XUBIO_URL_LIBRO_MAYOR` | vacío | Dirección del Libro Mayor si el bot no la encuentra en el menú |
+
+Las claves de ARCA y Xubio que se escriben en la pantalla de Conexiones **no se guardan**: viven
+en memoria mientras la ventana del bot está abierta.
+
+En el front, la URL de la API está en `frontend/src/environments/` (`http://localhost:8001/api`
+en desarrollo, `/api` en producción).
+
+---
 
 ## Tests
 
@@ -218,58 +366,94 @@ cd frontend
 npm test
 ```
 
-## Build de producción del frontend
+Antes de subir algo, también:
 
 ```bash
 cd frontend
-npm run build
-npm run serve:ssr:retenciones-frontend
+npx ng build
 ```
 
-## Despliegue en Render
+---
 
-El repo trae un `Dockerfile` y un `render.yaml` (Blueprint). Es **un solo servicio**: la
-imagen compila el front y el backend lo sirve en el mismo dominio que la API (`/api`), sin CORS.
+## Despliegue
 
-1. Subir el repo a GitHub/GitLab.
-2. En Render: **New → Blueprint**, elegir el repo. Crea el servicio `retenciones` con un
-   **disco persistente** en `/var/data` (base SQLite y archivos). El disco
-   requiere plan pago (`starter`); sin disco, todo se borra en cada deploy.
-3. Completar en el panel `EMPRESA` y, si se usan, `XUBIO_USUARIO` / `XUBIO_CLAVE`.
-4. Mientras no esté conectada la página principal, el servicio queda **abierto** (ver Usuarios y
-   roles): no lo dejes público con datos reales.
+En producción es **un solo servicio**: el `Dockerfile` compila el front, instala el backend,
+Google Chrome y una pantalla virtual (Xvfb), y el backend sirve todo en el mismo dominio. No hace
+falta configurar CORS.
 
-Detalles:
+### Render
 
-- Antes de cargar datos reales, poné `PERMITIR_ELIMINAR_CERRADOS=false`.
-- **Bots:** la imagen trae Google Chrome y una pantalla virtual (Xvfb), pero en el servidor
-  **nadie ve la ventana**: el doble factor de ARCA y el captcha de Xubio no se pueden
-  completar. Funcionan solo las cuentas sin esos pasos; si no, usar la importación de archivos
-  o correr la app localmente para los bots.
-- Probar la imagen localmente:
+1. Subir los cambios a GitHub (`main`): con `autoDeploy: true`, Render vuelve a desplegar solo.
+2. La primera vez: en Render, **New → Blueprint** y elegir este repo. `render.yaml` crea el
+   servicio `retenciones` con un **disco persistente** en `/var/data` (requiere plan pago;
+   sin disco se borra todo en cada deploy).
+3. En el panel, completar `RETENCIONES_MODULO_SECRETO` (el mismo de ContadorWeb), `EMPRESA` y,
+   si se usan, `XUBIO_USUARIO` / `XUBIO_CLAVE`. Agregar `PERMITIR_ELIMINAR_CERRADOS=false`.
+4. El health check es `/api/salud`.
+
+### Cualquier otro servidor (VPS, servidor propio)
+
+Con Docker instalado:
 
 ```bash
 docker build -t retenciones .
 ```
 
 ```bash
-docker run --rm -p 8001:8001 -v retenciones-datos:/var/data retenciones
+docker run -d --name retenciones --restart unless-stopped -p 8001:8001 -v retenciones-datos:/var/data -e RETENCIONES_MODULO_SECRETO=<secreto> -e PERMITIR_ELIMINAR_CERRADOS=false retenciones
 ```
 
-## Estructura
+- Poner delante un proxy con HTTPS (Nginx, Caddy, Traefik) que apunte a `localhost:8001`.
+  El contenedor ya arranca con `--proxy-headers`, así la auditoría guarda la IP real.
+- El volumen `retenciones-datos` es lo único que hay que respaldar.
+- Para actualizar: `git pull`, `docker build` y volver a crear el contenedor con el mismo volumen.
 
-```
-backend/
-  app/
-    api/        Rutas de la API (conciliación y conexiones de los bots)
-    bots/       Automatización de Chrome para ARCA y Xubio
-    core/       Configuración (variables de entorno)
-    services/   Importadores, conciliador, exportador a Excel
-    assets/     Logo del membrete
-  datos/        Descargas de los bots y perfil de Chrome (se crea solo, fuera de git)
-  tests/
-frontend/
-  src/app/
-    core/       Modelos, servicios y stores
-    features/   Pantallas: importar, consulta ARCA, conciliación, conexiones
-```
+Sin Docker: compilar el front (`npm run build`), apuntar `FRONT_DIST` a
+`frontend/dist/retenciones-frontend/browser` y correr
+`uv run uvicorn app.main:app --host 0.0.0.0 --port 8001` dentro de `backend/`.
+
+### Checklist antes de producción
+
+- [ ] `RETENCIONES_MODULO_SECRETO` configurado (sin él, cualquiera puede hacerse pasar por otro usuario).
+- [ ] `PERMITIR_ELIMINAR_CERRADOS=false`.
+- [ ] Disco o volumen persistente en `/var/data`.
+- [ ] HTTPS delante.
+
+### Bots en el servidor
+
+La imagen trae Chrome y Xvfb, pero en un servidor **nadie ve la ventana**: el doble factor de
+ARCA y el captcha de Xubio no se pueden completar. Ahí funcionan solo las cuentas sin esos
+pasos; si no, se usa la importación de archivos o se corre la app en una PC para los bots.
+
+---
+
+## Cambios típicos
+
+| Quiero… | Dónde |
+|---|---|
+| Reconocer un impuesto nuevo o un código de ARCA | `services/impuestos.py` (`CODIGOS_ARCA`, `_PALABRAS`) + `tests/test_codigos_arca.py` |
+| Cambiar cómo se emparejan ARCA y el Mayor | `services/conciliador.py` + `tests/test_conciliacion.py` |
+| Leer un formato nuevo de export | `services/importador_tablas.py` (alias de columnas) y el importador de ese lado |
+| Cambiar el Excel del papel de trabajo | `services/exportador.py` + `tests/test_exportador.py` |
+| Cambiar el Excel del lote o su validación | `services/excel_lote.py`, `services/validacion_excel.py` |
+| Agregar una justificación o un código de discrepancia | `services/partidas.py` (lo lee el front desde `/lotes/catalogo`) |
+| Cambiar qué traba enviar o aprobar | Backend: `lotes.compuertas()`. Front: `features/revision/revision.reglas.ts` |
+| Agregar una columna a la base | `core/db.py` (lista de columnas agregadas: se migra sola) |
+| Arreglar un bot cuando ARCA o Xubio cambian la pantalla | `bots/misret.py`, `bots/navegador_arca.py`, `bots/libro_mayor_xubio.py` (selectores arriba de cada archivo y en `config.py`) |
+| Agregar una pantalla | `frontend/src/app/features/<nueva>/` + ruta en `app.routes.ts` + entrada en el menú de `app.html` |
+
+Convenciones: código y mensajes en español; importes en el front en centavos enteros
+(`revision.util.ts → centavos`) y en el backend con `Decimal`; componentes standalone con signals.
+
+---
+
+## Problemas conocidos
+
+- **`uv sync` desde una app empaquetada de Windows** (por ejemplo, el escritorio de Claude) puede
+  dejar Python en una carpeta virtualizada y fallar con *"did not find executable at
+  ...\uv\python\cpython-3.14...\python.exe"*. Solución: borrar `backend/.venv` y correr
+  `uv sync` desde PowerShell o la terminal de VS Code.
+- **Formato del TXT para la DDJJ**: hoy es `CUIT|FECHA|CERTIFICADO|IMPUESTO|IMPORTE`; falta
+  ajustarlo al aplicativo definitivo (`services/lotes.py`, exportación fiscal).
+- **Tareas en memoria**: una conciliación abierta se pierde si se reinicia el servidor
+  (los lotes no).

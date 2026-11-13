@@ -125,7 +125,6 @@ class Cambios(BaseModel):
     # {id de movimiento: {campo: valor}}
     cambios: dict[str, dict[str, str | float | None]] = {}
     nuevos: list[MovimientoNuevo] = []
-    # Ids de los movimientos a quitar.
     eliminados: list[str] = []
 
 

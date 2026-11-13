@@ -82,9 +82,7 @@ def _conflicto(mensaje: str, codigo: str = "ESTADO", errores: list[dict] | None 
     return ErrorDeLote(409, codigo, mensaje, errores)
 
 
-# ----------------------------------------------------------------------
 # Archivos (guardados por hash: el mismo contenido es el mismo archivo)
-# ----------------------------------------------------------------------
 
 
 def _sha(contenido: bytes) -> str:
@@ -137,9 +135,7 @@ def _leer_version(version: dict) -> bytes:
     return ruta_archivo(version["sha256"], ".xlsx").read_bytes()
 
 
-# ----------------------------------------------------------------------
 # Lectura
-# ----------------------------------------------------------------------
 
 
 def _lote(c: sqlite3.Connection, lote_id: str) -> dict:
@@ -176,9 +172,7 @@ def _version_vigente(c: sqlite3.Connection, lote: dict) -> dict:
     return _version(c, lote["id"], lote["version_vigente"])
 
 
-# ----------------------------------------------------------------------
 # Permisos y compuertas
-# ----------------------------------------------------------------------
 
 
 def _exigir_rol(usuario: Usuario, *roles: str) -> None:
@@ -264,9 +258,7 @@ def pendientes(c: sqlite3.Connection, lote: dict, evidencia_nueva: int = 0) -> l
     return avisos
 
 
-# ----------------------------------------------------------------------
 # Versiones
-# ----------------------------------------------------------------------
 
 
 def _nombre_version(lote: dict, numero: int) -> str:
@@ -556,9 +548,7 @@ def actualizar_partida(usuario: Usuario, lote_id: str, clave: str, version: int,
     return detalle
 
 
-# ----------------------------------------------------------------------
 # Adjuntos
-# ----------------------------------------------------------------------
 
 
 def _revisar_adjunto(contenido: bytes, nombre: str, permitidos: set[str], max_mb: int) -> str:
@@ -642,9 +632,7 @@ def archivo_version(usuario: Usuario, lote_id: str, numero: int) -> tuple[Path, 
         return ruta_archivo(version["sha256"], ".xlsx"), version["nombre_archivo"]
 
 
-# ----------------------------------------------------------------------
 # Transiciones
-# ----------------------------------------------------------------------
 
 
 def _notificar(c: sqlite3.Connection, lote: dict, tipo: str, texto: str, destinatario_id: str | None = None,
@@ -869,9 +857,7 @@ def eliminar(usuario: Usuario, lote_id: str) -> None:
     soltar_archivos()
 
 
-# ----------------------------------------------------------------------
 # Exportación fiscal (solo aprobado)
-# ----------------------------------------------------------------------
 
 
 def _contenido_exportacion(tipo: str, lote: dict, partidas: list[dict]) -> bytes:
@@ -933,9 +919,7 @@ def archivo_exportacion(usuario: Usuario, lote_id: str, exportacion_id: str) -> 
         return ruta_archivo(fila["sha256"], "." + EXPORTACIONES[fila["tipo"]][1]), fila["nombre"]
 
 
-# ----------------------------------------------------------------------
 # Consultas
-# ----------------------------------------------------------------------
 
 
 def _detalle(c: sqlite3.Connection, lote_id: str) -> dict:

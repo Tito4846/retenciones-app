@@ -211,7 +211,7 @@ export class Conciliacion {
     document.getElementById('detalle')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
-  // --- Edición en línea: el estado vive en EstadoTablaConciliacion; acá solo la vista
+  // Edición en línea: el estado vive en EstadoTablaConciliacion; acá solo la vista.
   protected readonly ediciones = this.tabla.ediciones;
   protected readonly borrador = this.tabla.borrador;
   protected readonly nuevos = this.tabla.nuevos;

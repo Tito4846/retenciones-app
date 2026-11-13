@@ -16,13 +16,11 @@
   <p class="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">{{ error }}</p>
 }
 
-<!-- Lo mismo en los dos formularios: por qué es seguro poner la clave acá -->
 <ng-template #avisoSeguridad>
   <p class="text-xs text-muted sm:col-span-2">Las claves no se guardan: se usan solo para entrar y se borran al desconectar.</p>
 </ng-template>
 
 <div class="grid items-start gap-6 xl:grid-cols-2">
-  <!-- ARCA -->
   @let arca = store.arca();
   <app-bot-connection-card
     nombre="ARCA"
@@ -77,7 +75,6 @@
     }
   </app-bot-connection-card>
 
-  <!-- Xubio -->
   @let xubio = store.xubio();
   <app-bot-connection-card
     nombre="Xubio"

@@ -5,9 +5,7 @@
 
   @if (d(); as det) {
     @let p = permisos();
-    <!-- En pantallas chicas no recorta: los totales se pegan arriba de la ventana -->
     <section class="flex min-h-0 min-w-0 flex-col rounded-2xl border border-line bg-canvas xl:overflow-hidden">
-      <!-- De quién es el lote y en qué paso está -->
       <header class="space-y-1 rounded-t-2xl border-b border-line bg-white px-3 py-2">
         <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
           <h2 class="min-w-0 truncate text-base font-semibold" [title]="nombre()">{{ nombre() }}</h2>
@@ -40,10 +38,7 @@
       }
 
       <div class="min-h-0 flex-1 space-y-2 p-3 xl:overflow-y-auto">
-        <!--
-          Totales y Excel siempre a la vista: sticky dentro del panel (en xl) o de la ventana.
-          Asoma 3.25rem (h-11 + pb-2; el pt-3 queda tapado): la cabecera de la tabla va en top-13.
-        -->
+        <!-- Sticky: asoma 3.25rem (h-11 + pb-2), por eso la cabecera de la tabla va en top-13 -->
         <div class="sticky -top-3 z-20 -mx-3 -mt-3 flex gap-2 border-b border-line bg-canvas/95 px-3 pt-3 pb-2 backdrop-blur">
           <app-marcador-cruce class="h-11 min-w-0 flex-1" [sistema]="totales().sistema" [declarado]="totales().declarado" />
           <app-excel-lote class="h-11 shrink-0" [detalle]="det" [editar]="p.editar" [revisar]="p.revisar" />

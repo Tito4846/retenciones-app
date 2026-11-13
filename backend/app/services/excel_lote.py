@@ -40,7 +40,6 @@ ENCABEZADOS = [c[0] for c in COLUMNAS]
 CAMPO = {c[0]: c[1] for c in COLUMNAS}
 COLUMNAS_IMPORTE = ("importe_fisco", "importe_erp", "diferencia")
 COLUMNAS_FECHA = ("fecha_fisco", "fecha_erp")
-# El Excel es el único lugar donde se trabaja la partida: también lleva el ajuste y la exclusión.
 COLUMNAS_LIBRES = (*P.CAMPOS_EDITABLES, "importe_ajustado", "excluida")
 TITULO_TOTALES = "TOTALES"
 CLAVE_PROTECCION = "retenciones"

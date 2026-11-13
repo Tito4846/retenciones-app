@@ -147,9 +147,7 @@ def _desde_dataframe(df: pd.DataFrame, vacio_ok: bool = False) -> LecturaMayor:
     return LecturaMayor(retenciones, aplicaciones, tuple(saldos_iniciales))
 
 
-# ----------------------------------------------------------------------
 # El mismo mayor, pero bajado por el bot de Xubio (webreport)
-# ----------------------------------------------------------------------
 #
 # El webreport de Xubio no devuelve JSON sino XML:
 #   <root><dataset><fields><field name=.../></fields><data>CSV</data></dataset></root>

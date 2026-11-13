@@ -66,7 +66,6 @@ export class EntregaLote {
     return v ? quienArmo(v.autor_nombre, v.origen, v.correccion_checker) : '';
   });
   protected readonly cambiadas = computed(() => this.vigente()?.validacion.resumen?.cambiadas ?? 0);
-  /** La nota del último envío, si tiene. */
   protected readonly nota = computed(() => [...this.detalle().decisiones].reverse().find((d) => d.tipo === 'envio' && d.motivo) ?? null);
   /** Lo que el Excel trajo y no se aplicó. Lo que falta completar ya se ve en la tabla. */
   protected readonly avisos = computed(() => (this.vigente()?.validacion.advertencias ?? []).filter((a) => a.etapa !== 4));

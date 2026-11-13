@@ -14,7 +14,7 @@ export const appConfig: ApplicationConfig = {
     provideRouter(routes),
     // XHR (no fetch) para poder reportar el progreso de subida de archivos.
     provideHttpClient(withXhr(), withInterceptors([sesionInterceptor])),
-    // Antes de la primera pantalla: si hay una sesión viva (cookie), se retoma.
+    // Antes de la primera pantalla: canjea el pase de ContadorWeb o retoma la sesión guardada.
     provideAppInitializer(() => inject(SesionService).iniciar()),
     { provide: LOCALE_ID, useValue: 'es-AR' },
   ]

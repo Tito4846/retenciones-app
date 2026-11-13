@@ -36,7 +36,7 @@ export class LotesStore {
   readonly error = signal<ErrorApi | null>(null);
   /** Por qué el lote no se armó solo al terminar el cruce. */
   readonly errorCruce = signal<ErrorApi | null>(null);
-  /** El rechazo del Excel subido: se muestra junto a los botones del Excel, no arriba de todo. */
+  /** El rechazo del Excel subido: se muestra en el gestor del lote, no arriba de todo. */
   readonly errorExcel = signal<ErrorApi | null>(null);
 
   /** Lo que espera algo de quien está usando el módulo (contador del menú). */
@@ -115,7 +115,6 @@ export class LotesStore {
     });
   }
 
-  // --- Acciones (devuelven true si salió bien) -------------------------------
 
   crear(taskId: string, datos: NuevoLote): Observable<DetalleLote | null> {
     this.error.set(null);

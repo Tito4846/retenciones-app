@@ -101,7 +101,6 @@ type Panel = 'ajustar' | 'descartar' | 'detalle' | null;
       </td>
     </tr>
 
-    <!-- Debajo, solo si hay algo que decir: la justificación (una línea) o el panel abierto -->
     @if (encima() || subiendo() || rechazo() || panel() || nota()) {
     <tr>
       <td colspan="7" class="px-2 pb-1.5 text-xs">
@@ -218,7 +217,6 @@ export class FilaPartida {
 
   readonly partida = input.required<Partida>({ alias: 'appFilaPartida' });
   readonly estado = input.required<EstadoFila>();
-  /** Los comprobantes pegados a esta partida. */
   readonly adjuntos = input<Adjunto[]>([]);
   readonly loteId = input.required<string>();
   readonly version = input.required<number>();
@@ -300,7 +298,6 @@ export class FilaPartida {
     this.store.actualizarPartida(this.loteId(), this.partida().clave, this.version(), cambios).subscribe((ok) => ok && this.panel.set(null));
   }
 
-  // --- Soltar un comprobante sobre la fila -----------------------------------
 
   protected sobre(evento: DragEvent): void {
     if (!this.editar() || !evento.dataTransfer?.types.includes('Files')) return;

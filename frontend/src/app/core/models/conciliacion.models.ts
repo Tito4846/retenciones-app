@@ -190,6 +190,5 @@ export interface MovimientoNuevo {
 export interface CambiosMovimientos {
   cambios: Record<string, Partial<Record<'fecha' | 'razon_social' | 'certificado' | 'documento' | 'importe', string | number>>>;
   nuevos: MovimientoNuevo[];
-  /** Ids de los movimientos a quitar. */
   eliminados: string[];
 }

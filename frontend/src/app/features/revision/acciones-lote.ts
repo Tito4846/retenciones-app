@@ -59,7 +59,6 @@ import { Permisos } from './revision.util';
         <button type="button" (click)="confirmar.set('anular')" class="px-2 text-sm font-semibold text-muted hover:text-red-700">Anular</button>
       }
       @if (p.editar && !p.revisar) {
-        <!-- Lo principal para quien prepara: el botón más grande y con más peso de la barra -->
         <span [title]="trabasEnviar().join('\\n')">
           <button type="button" (click)="enviar()" [disabled]="store.ocupado() || trabasEnviar().length > 0"
             class="flex items-center gap-2 rounded-lg bg-brand-700 px-5 py-2.5 text-sm font-bold text-white shadow-md shadow-brand-700/25 ring-2 ring-brand-700/20 ring-offset-2 transition hover:bg-brand-800 hover:shadow-lg focus-visible:ring-brand-400 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none">
@@ -82,10 +81,7 @@ import { Permisos } from './revision.util';
       }
       @if (p.revisar || p.autor) {
         @let bloqueado = trabasAprobar().length > 0;
-        <!--
-          Poka-yoke: deshabilitado con diferencia neta, excepciones sin completar o lote propio.
-          Un botón disabled no recibe foco ni hover: el envoltorio hace de disparador del tooltip.
-        -->
+        <!-- Un botón disabled no muestra tooltip: lo dispara el envoltorio -->
         <span class="group relative inline-flex" [attr.tabindex]="bloqueado ? 0 : null" [attr.aria-describedby]="bloqueado ? 'por-que-no-aprobar' : null">
           <button type="button" (click)="confirmar.set('aprobar')" [disabled]="store.ocupado() || bloqueado"
             class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:pointer-events-none disabled:bg-zinc-300 disabled:text-zinc-600">Aprobar y Cerrar Lote</button>

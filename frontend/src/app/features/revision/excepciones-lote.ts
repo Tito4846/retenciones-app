@@ -26,7 +26,6 @@ const ORDEN: EstadoFila[] = ['falta_accion', 'falta_comprobante', 'en_revision',
       </div>
     }
     </div>
-    <!-- Anchos fijos: la tabla entra en el panel y el agente se queda con lo que sobra -->
     <table class="w-full table-fixed border-separate border-spacing-0 border-y border-line bg-white text-left text-[13px]" aria-label="Excepciones del lote">
       <colgroup>
         <col />
@@ -37,7 +36,6 @@ const ORDEN: EstadoFila[] = ['falta_accion', 'falta_comprobante', 'en_revision',
         <col class="w-36" />
         <col class="w-21" />
       </colgroup>
-      <!-- Pegada debajo del panel de totales, que también queda fijo -->
       <thead class="sticky top-13 z-10 text-muted [&_th]:bg-canvas">
         <tr class="[&_th]:px-2 [&_th]:py-1.5 [&_th]:font-semibold [&_th]:whitespace-nowrap">
           <th scope="col">Agente / Proveedor</th>

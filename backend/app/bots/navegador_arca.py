@@ -103,9 +103,7 @@ class DescargaArca:
         return {"nombre": self.nombre, "filas": self.filas, "cuando": self.cuando.isoformat(timespec="seconds")}
 
 
-# ----------------------------------------------------------------------
-# Login y entrada al servicio (de Arca-bot fase1_sesion.py)
-# ----------------------------------------------------------------------
+# Login y entrada al servicio
 
 def _login(pagina: Any, cuit: str, clave: str, reportar: Callable[[str], None]) -> bool:
     """CUIT + clave fiscal en auth.afip.gob.ar, con espera del doble factor. True si lo pidio."""
@@ -330,9 +328,7 @@ def capturar_paginas(contexto: Any, directorio: Path, etiqueta: str) -> list[str
     return guardados
 
 
-# ----------------------------------------------------------------------
 # Chrome
-# ----------------------------------------------------------------------
 
 class _ChromeArca:
     """Context manager: Chrome sin perfil (cada conexion entra de cero)."""
@@ -366,9 +362,7 @@ class _ChromeArca:
             logger.info("Ventana de ARCA cerrada.")
 
 
-# ----------------------------------------------------------------------
 # El bot
-# ----------------------------------------------------------------------
 
 def _limpiar_cuit(valor: str | None) -> str:
     return re.sub(r"\D", "", valor or "")
@@ -416,7 +410,7 @@ class NavegadorArca:
         # Lo que fue pasando, para el mini-log de la pantalla (solo en memoria).
         self._bitacora = Bitacora()
 
-    # ------------------------------------------------------------------ API
+    # API
 
     def estado(self) -> dict[str, Any]:
         """El estado para la pantalla. Nunca lleva la clave."""
@@ -624,7 +618,7 @@ class NavegadorArca:
                 if not hilo.is_alive() and not futuro.done():
                     raise ArcaDesconectado(MENSAJE_CERRADO) from None
 
-    # ----------------------------------------------------- hilo del navegador
+    # hilo del navegador
 
     def _estado_sin_candado(self) -> dict[str, Any]:
         return {

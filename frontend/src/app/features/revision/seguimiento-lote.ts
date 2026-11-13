@@ -38,7 +38,6 @@ const ESTADO_LEIBLE: Record<EstadoPaso, string> = {
   imports: [DatePipe],
   host: { class: 'block' },
   template: `
-    <!-- Una sola línea: quién hizo cada paso; la fecha va en el tooltip -->
     <ol class="flex min-w-0 items-center gap-1.5 overflow-hidden text-xs whitespace-nowrap" aria-label="Recorrido del lote">
       @for (p of pasos(); track p.titulo; let ultimo = $last) {
         <li class="flex min-w-0 items-center gap-1.5" [attr.aria-current]="p.estado === 'actual' ? 'step' : null"

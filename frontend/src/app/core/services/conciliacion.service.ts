@@ -186,7 +186,6 @@ export class ConciliacionService {
       try {
         return decodeURIComponent(extendido[1]);
       } catch {
-        // Cae al filename simple.
       }
     }
     return disposicion.match(/filename="?([^";]+)"?/i)?.[1] ?? 'Retenciones ARCA.xlsx';

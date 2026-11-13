@@ -152,7 +152,7 @@ class NavegadorXubio:
         # Lo que fue pasando, para el mini-log de la pantalla (solo en memoria).
         self._bitacora = Bitacora()
 
-    # ------------------------------------------------------------------ API
+    # API
 
     def _cuenta_actual(self) -> tuple[str, str] | None:
         if self._cuenta:
@@ -293,7 +293,7 @@ class NavegadorXubio:
 
         return self.ejecutar(recorrer)
 
-    # ----------------------------------------------------- hilo del navegador
+    # hilo del navegador
 
     def _fijar(self, estado: str, mensaje: str | None) -> None:
         with self._candado:
